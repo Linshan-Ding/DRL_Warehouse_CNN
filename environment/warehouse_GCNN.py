@@ -69,7 +69,7 @@ class Robot:
         self.pick_point = None  # 机器人当前拣货位
         self.order = None  # 机器人关联的订单
         self.item_pick_order = []  # 机器人剩余未拣选商品的对象列表（按拣选顺序排序）
-        self.state = 'idle'  # 机器人所处状态：'idle', 'busy'
+        self.state = 'idle'  # 机器人所处状态：'idle', 'busy', 'moving'
         self.speed = 2  # 机器人移动速度
         self.unit_time_cost = 1  # 机器人工作单位时间成本
         self.pick_point_complete_time = 0  # 机器人在当前拣货位的拣货完成时间
@@ -349,8 +349,16 @@ class WarehouseEnv:
                             pick_point.picker.pick_end_time += item.pick_time  # 更新拣货员拣货完成时间
                         robot.pick_point_complete_time = pick_point.picker.pick_end_time  # 机器人在该拣货位的拣货完成时间
 
-            # 3、若当前时间等于拣货员拣货完成时刻，则更新拣货员的状态，重置拣货位的拣货员对象
+            # 3、若当前时间等于拣货员拣货完成时刻，则更新拣货员的状态，重置拣货位的拣货员对象; 若等于拣货员移动到拣货位开始拣货时刻，则更新拣货员的状态
             for picker in self.pickers:
+                if self.current_time == picker.pick_start_time:
+                    # print("拣货员移动到拣货位开始拣货")
+                    picker.state = 'busy'
+                    pick_point = picker.pick_point  # 拣货员所在拣货位
+                    pick_point.picker = picker  # 更新拣货位的拣货员对象
+                    picker.pick_point = pick_point  # 更新拣货员的拣货位对象
+                    picker.position = pick_point.position  # 更新拣货员的位置
+
                 if self.current_time == picker.pick_end_time:
                     # print("拣货员拣货完成")
                     picker.state = 'idle'  # 更新拣货员的状态

@@ -1,7 +1,7 @@
 """
-生成仿真订单
+生成仿真订单数据和算例数据
 """
-from class_public import Order
+from environment.class_public import Order
 import random
 import copy
 import csv

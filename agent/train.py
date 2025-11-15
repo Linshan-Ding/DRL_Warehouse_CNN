@@ -1,40 +1,33 @@
-# train.py
+# train.py - 只使用 Visdom
 import torch
 from environment.env_test import WarehouseEnv
 from MAPPO import MAPPO, Memory
 from conj import config
 
-# Visdom初始化 - 使用时间戳确保唯一性
-try:
-    from visdom import Visdom
-
-    # 创建唯一的环境名
-    env_name = "warehouse_test"
-    viz = Visdom(port=8097, env=env_name)
-    viz_enabled = True
-
-    # 先关闭可能存在的旧窗口
-    viz.close(win="reward_curve")
-
-    # 创建新窗口
-    viz.line(
-        [0], [0],
-        win="reward_curve",
-        opts=dict(
-            title=f"Training Reward - {env_name}",
-            xlabel='Episode',
-            ylabel='Reward',
-            showlegend=True
-        )
-    )
-    print(f"Visdom enabled with env: {env_name}")
-except Exception as e:
-    viz_enabled = False
-    print(f"Visdom not available: {e}")
-    reward_history = []
-
 
 def main():
+    try:
+        from visdom import Visdom
+        env_name = "warehouse_test"
+        viz = Visdom(port=8097, env=env_name)
+
+        viz.line(
+            [0], [0],
+            win="reward_curve",
+            opts=dict(
+                title=f"Training Reward - {env_name}",
+                xlabel='Episode',
+                ylabel='Reward',
+                showlegend=True
+            )
+        )
+        print(f"✅ Visdom enabled with env: {env_name}")
+
+    except Exception as e:
+        print(f"❌ Visdom disabled: {e}")
+        return
+
+    # 环境初始化
     env = WarehouseEnv()
     agent = MAPPO(config)
     memory = Memory(config.n_amrs, config.n_pickers)
@@ -48,7 +41,6 @@ def main():
 
         ep_reward = 0.0
 
-        # rollout
         for step in range(max_steps):
             amr_pairs, picker_pairs = env.get_action_pairs()
             result = agent.select_actions(obs, amr_pairs, picker_pairs)
@@ -57,7 +49,7 @@ def main():
             next_obs, reward, terminated, truncated, _ = env.step(action_list)
             next_obs = torch.tensor(next_obs, dtype=torch.float32)
 
-            # store into memory
+            # 存储经验
             memory.states.append(obs.clone().detach().cpu())
             memory.rewards.append(float(reward))
             memory.amr_pairs.append(amr_pairs.clone().detach().cpu())
@@ -74,7 +66,7 @@ def main():
             if terminated or truncated:
                 break
 
-        # after rollout: compute returns & advantages (GAE)
+        # 计算GAE和returns
         with torch.no_grad():
             state_tensor = torch.stack(memory.states).to(agent.device)
             state_values = agent.critic(agent.cnn(state_tensor)).squeeze(-1)
@@ -90,18 +82,17 @@ def main():
 
         print(f"EP {ep}, Reward={ep_reward:.4f}")
 
-        # 更新图表 - 确保数据格式正确
-        if viz_enabled:
-            try:
-                viz.line(
-                    [ep_reward], [ep],
-                    win="reward_curve",
-                    update='append',
-                    name='Episode Reward'
-                )
-            except Exception as e:
-                print(f"Visdom update failed: {e}")
-                viz_enabled = False
+        # 更新 Visdom 图表
+        viz.line(
+            [ep_reward], [ep],
+            win="reward_curve",
+            update='append',
+            name='Episode Reward'
+        )
+
+        # 保存模型
+        if ep % 100 == 0:
+            torch.save(agent.state_dict(), f"checkpoints/mappo_ep{ep}.pth")
 
 
 if __name__ == "__main__":

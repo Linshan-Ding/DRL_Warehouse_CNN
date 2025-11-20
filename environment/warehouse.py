@@ -7,140 +7,15 @@
 import numpy as np
 import random
 import pickle
-from environment.generat_order_csv_pkl import GenerateData
-
-class Item:
-    def __init__(self, item_id, bin_id, position, pick_point_id):
-        self.item_id = item_id  # 商品的编号
-        self.bin_id = bin_id  # 商品所在的储货位编号
-        self.position = position  # 商品所在的位置
-        self.pick_point_id = pick_point_id  # 商品所属拣货位的编号
-        self.pick_time = 1  # 拣选时间
-        self.pick_complete_time = 0  # 商品拣选完成时间
-
-
-# 起始点类
-class Depot:
-    def __init__(self, position):
-        self.position = position  # 起始点的位置
-
-
-# 储货位类
-class StorageBin:
-    def __init__(self, bin_id, position, item_id, pick_point_id):
-        self.bin_id = bin_id  # 储货位的编号
-        self.position = position  # 储货位的位置
-        self.item_id = item_id  # 储货位中的商品编号
-        self.pick_point_id = pick_point_id  # 储货位所属拣货位的编号
-        # 当前储货位的机器人对象队列
-        self.robot_queue = []
-        # 当前储货位的拣货员对象
-        self.picker = None
-
-
-# 拣货位类
-class PickPoint:
-    def __init__(self, point_id, position, item_ids, storage_bin_ids):
-        self.point_id = point_id  # 拣货位的编号
-        self.position = position  # 拣货位的位置
-        self.item_ids = item_ids  # 拣货位中的商品编号列表
-        self.storage_bin_ids = storage_bin_ids  # 拣货位对应的储货位编号列表
-        # 拣货位的机器人对象队列
-        self.robot_queue = []
-        # 拣货位的拣货员对象
-        self.picker = None
-        # 拣货位的未拣货商品列表
-        self.unpicked_items = []
-
-    # 监测拣货位置是否待分配拣货员
-    @property
-    def is_idle(self):
-        # 如果拣货位上未分配拣货员且机器人队列中有机器人，则返回True
-        if len(self.robot_queue) > 0 and self.picker is None:
-            return True
-        # 如果拣货位上有拣货员，则返回False
-        else:
-            return False
-
-
-class Robot:
-    def __init__(self, position):
-        self.position = position  # 机器人的位置
-        self.pick_point = None  # 机器人当前拣货位
-        self.order = None  # 机器人关联的订单
-        self.item_pick_order = []  # 机器人剩余未拣选商品的对象列表（按拣选顺序排序）
-        self.state = 'idle'  # 机器人所处状态：'idle', 'busy', 'moving'
-        self.speed = 2  # 机器人移动速度
-        self.unit_time_cost = 1  # 机器人工作单位时间成本
-        self.pick_point_complete_time = 0  # 机器人在当前拣货位的拣货完成时间
-        self.move_to_pick_point_time = 0  # 机器人移动到拣货位的时间
-        self.move_to_depot_time = 0  # 机器人移动到depot_position的时间
-        self.working_time = 0  # 机器人工作时间
-        self.remove = False  # 机器人移除标识
-
-    def assign_order(self, order):
-        """为机器人分配订单"""
-        self.order = order
-        self.plan_item_order()
-
-    def plan_item_order(self):
-        """订单中的商品对象拣选顺序规划"""
-        if self.order is not None:
-            self.item_pick_order = [item for item in self.order.items]
-            # 商品对象按照其拣货位的位置进行排序（按位置X坐标从小到大重排序，相同X坐标的按照Y坐标从小到大进行排序）
-            self.item_pick_order = sorted(self.item_pick_order, key=lambda x: (x.position[0], x.position[1]))
-        else:
-            self.item_pick_order = []
-
-    # 返回机器人在当前拣货位拣货完成后的下一个拣货位
-    def next_pick_point(self, pick_points):
-        if self.item_pick_order:
-            next_item = self.item_pick_order[0]
-            next_pick_point = next_item.pick_point_id
-            return pick_points[next_pick_point]
-        return None
-
-    # 机器人关联订单中属于当前拣货位的商品列表
-    @property
-    def items(self):
-        if self.order is not None:
-            items = []  # 机器人关联订单中属于当前拣货位的商品列表
-            for item in self.order.items:
-                if item.pick_point_id == self.pick_point.point_id:
-                    items.append(item)
-            return items
-        return None
-
-class Picker:
-    def __init__(self, picker_id):
-        self.pick_point = None  # 拣货员当前拣货位
-        self.position = None  # 拣货员的位置
-        self.item = None  # 拣货员待拣选或正在拣选的商品
-        self.state = 'idle'  # 拣货员状态：'idle', 'busy'
-        self.speed = 2  # 拣货员移动速度
-        self.picker_id = picker_id  # 拣货员编号
-        self.unit_time_cost = 1  # 拣货员工作单位时间成本
-        self.storage_bins = []  # 拣货员负责的储货位列表
-        self.pick_points = []  # 拣货员负责的拣货位列表
-        self.working_time = 0  # 拣货员工作时间
-        self.pick_start_time = 0  # 拣货员在当前拣货位拣货开始时间
-        self.pick_end_time = 0  # 拣货员在当前拣货位拣货结束时间
-        self.remove = False  # 拣货员移除标识
-
-    # 根据负责的拣货位列表中的拣货位的坐标计算拣货员的初始位置（取各拣货位的坐标均值）
-    @ property
-    def initial_position(self):
-        x = np.mean([point.position[0] for point in self.pick_points])
-        y = np.mean([point.position[1] for point in self.pick_points])
-        position = (x, y)
-        return position
+from environment.class_config import Config
+from environment.class_object import Robot, Picker, PickPoint, StorageBin, Item, Depot
 
 
 # -------------------------仓库环境类---------------------------
 # 包括机器人、拣货员、拣货位、储货位和商品
 # 步进函数step()实现仓库环境的仿真
 # 动作为每间隔24个小时调整每个区域的拣货员和仓库中总的机器人的数量
-class WarehouseEnv:
+class WarehouseEnv(Config):
     def __init__(self, N_l, N_w, S_l, S_w, S_b, S_d, S_a, N_robots, N_pickers, depot_position):
         # 仓库环境参数
         self.N_l = N_l  # 单个货架中储货位的数量
@@ -570,7 +445,7 @@ if __name__ == "__main__":
     # generate_orders.generate_orders()  # 生成一个月内的订单数据
 
     # 读取订单数据，orders.pkl文件中
-    with open("orders.pkl", "rb") as f:
+    with open("../data/orders.pkl", "rb") as f:
         orders = pickle.load(f)
 
     # 基于订单数据和仓库环境数据，实现仓库环境的仿真
@@ -588,6 +463,6 @@ if __name__ == "__main__":
         # 仓库环境的仿真步进函数
         state, reward, done = warehouse.step(action)
         # 输出当前状态
-        # print(f"Current state: {warehouse.state}")
+        print(f"Current state: {warehouse.state}")
         print(f"Current time: {warehouse.current_time}")  # 当前时间
         print("-----------------------------------------------------------------------------------------------------------------------------------------------")

@@ -53,13 +53,12 @@ class Order(Config):
 
 # 商品类
 class Item(Config):
-    def __init__(self, item_id, bin_id, position, area_id, pick_point_id):
+    def __init__(self, item_id, bin_id, position, pick_point_id):
         super().__init__()  # 调用父类的构造函数
         self.parameter = self.parameters["item"]  # 商品参数
         self.item_id = item_id  # 商品的编号
         self.bin_id = bin_id  # 商品所在的储货位编号
         self.position = position  # 商品所在的位置
-        self.area_id = area_id  # 商品所在的区域编号
         self.pick_point_id = pick_point_id  # 商品所属拣货位的编号
         self.pick_time = self.parameter["pick_time"]  # 商品拣选时间
         self.pick_complete_time = 0  # 商品拣选完成时间
@@ -73,13 +72,11 @@ class Depot:
 
 # 储货位类
 class StorageBin:
-    def __init__(self, bin_id, position, area_id, item_id, pick_point_id):
+    def __init__(self, bin_id, position, item_id, pick_point_id):
         self.bin_id = bin_id  # 储货位的编号
         self.position = position  # 储货位的位置
         self.item_id = item_id  # 储货位中的商品编号
         self.pick_point_id = pick_point_id  # 储货位所属拣货位的编号
-        # 储货位所属区域的编号
-        self.area_id = area_id
         # 当前储货位的机器人对象队列
         self.robot_queue = []
         # 当前储货位的拣货员对象
@@ -88,10 +85,9 @@ class StorageBin:
 
 # 拣货位类
 class PickPoint:
-    def __init__(self, point_id, position, area_id, item_ids, storage_bin_ids):
+    def __init__(self, point_id, position, item_ids, storage_bin_ids):
         self.point_id = point_id  # 拣货位的编号
         self.position = position  # 拣货位的位置
-        self.area_id = area_id  # 拣货位所属区域的编号
         self.item_ids = item_ids  # 拣货位中的商品编号列表
         self.storage_bin_ids = storage_bin_ids  # 拣货位对应的储货位编号列表
         self.robot_queue = []  # 当前拣货位的机器人对象队列
@@ -225,7 +221,7 @@ class Robot(Config):
 
 # -------------------------拣货员类---------------------------
 class Picker(Config):
-    def __init__(self, area_id):
+    def __init__(self):
         super().__init__()  # 调用父类的构造函数
         self.parameter = self.parameters["picker"]  # 拣货员参数
         self.pick_point = None  # 拣货员当前拣货位
@@ -233,7 +229,6 @@ class Picker(Config):
         self.item = None  # 拣货员待拣选或正在拣选的商品
         self.state = 'idle'  # 拣货员状态：'idle', 'busy'
         self.speed = self.parameter["picker_speed"]  # 拣货员移动速度
-        self.area_id = area_id  # 拣货员所在区域的编号
         self.unit_time_cost = None  # 拣货员单位时间雇佣成本
         self.storage_bins = []  # 拣货员负责的储货位列表
         self.pick_points = []  # 拣货员负责的拣货位列表
@@ -241,7 +236,6 @@ class Picker(Config):
         self.pick_start_time = 0  # 拣货员在当前拣货位拣货开始时间
         self.pick_end_time = 0  # 拣货员在当前拣货位拣货结束时间
         self.remove = False  # 拣货员移除标识
-        self.unit_fire_cost = self.parameter["unit_fire_cost"]  # 拣货员单位辞退成本
         self.hire_time = None  # 拣货员聘用开始时间
         self.fire_time = None  # 拣货员解聘时间
         self.rent = None  # 拣货员长租或短租标识

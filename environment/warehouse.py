@@ -1,7 +1,7 @@
 """
 智能仓库人机协同拣选系统仿真环境
 1、同一拣货位的不同商品的拣选时间需要叠加
-2、机器人移动到depot_position后，进行打包操作，打包时间为定值
+2、动作为强化学习给出的”拣选员-拣货位“对
 """
 
 import numpy as np
@@ -9,34 +9,35 @@ import random
 import pickle
 from environment.class_config import Config
 from environment.class_object import Robot, Picker, PickPoint, StorageBin, Item, Depot
-
+import gymnasium as gym
 
 # -------------------------仓库环境类---------------------------
 # 包括机器人、拣货员、拣货位、储货位和商品
 # 步进函数step()实现仓库环境的仿真
-# 动作为每间隔24个小时调整每个区域的拣货员和仓库中总的机器人的数量
-class WarehouseEnv(Config):
-    def __init__(self, N_l, N_w, S_l, S_w, S_b, S_d, S_a, N_robots, N_pickers, depot_position):
+class WarehouseEnv(gym.Env, Config):
+    def __init__(self):
+        super().__init__()
+        self.parameter = self.parameters["warehouse"]  # 仓库参数
         # 仓库环境参数
-        self.N_l = N_l  # 单个货架中储货位的数量
-        self.N_w = N_w  # 巷道的数量
-        self.S_l = S_l  # 储货位的长度
-        self.S_w = S_w  # 储货位的宽度
-        self.S_b = S_b  # 底部通道的宽度
-        self.S_d = S_d  # 仓库的出入口处的宽度
-        self.S_a = S_a  # 巷道的宽度
-        self.depot_position = depot_position  # 机器人的起始位置
-        self.pack_time = 10  # 机器人拣完订单后的打包时间
+        self.N_l = self.parameter["shelf_capacity"]  # 单个货架中储货位的数量
+        self.N_w = self.parameter["aisle_num"]  # 仓库巷道数量
+        self.S_l = self.parameter["shelf_length"]  # 储货位的长度
+        self.S_w = self.parameter["shelf_width"]  # 储货位的宽度
+        self.S_b = self.parameter["aisle_width"]  # 底部通道的宽度
+        self.S_d = self.parameter["entrance_width"]  # 仓库的出入口处的宽度
+        self.S_a = self.parameter["aisle_width"]  # 巷道的宽度
+        self.depot_position = self.parameter["depot_position"]  # 仓库起始点位置
+        self.pack_time = self.parameters["order"]["pack_time"]  # 订单打包时间
         self.total_orders = None  # 仿真总时间
-        self.N_robots = N_robots  # 仓库中机器人的数量
-        self.N_pickers = N_pickers  # 仓库中拣货员的数量
+        self.N_robots = self.parameters["robot"]["robot_num"]  # 仓库中机器人的数量
+        self.N_pickers = self.parameters["picker"]["picker_num"]  # 仓库中拣货员的数量
 
         # 仓库固定属性
         self.pick_points = {}  # 拣货位字典
         self.storage_bins = {}  # 储货位字典
         self.items = {}  # 商品字典
         self.pick_points_list = []  # 拣货位列表字典
-        self.depot_object = Depot(depot_position)  # 仓库起始点对象
+        self.depot_object = Depot(self.depot_position)  # 仓库起始点对象
         # 构建仓库图
         self.create_warehouse_graph()
 
@@ -126,7 +127,7 @@ class WarehouseEnv(Config):
         """为仓库中添加机器人和拣货员"""
         # 实例化拣货员对象并添加到仓库中
         for i in range(n_pickers):
-            picker = Picker(picker_id=i+1)  # 实例化拣货员对象
+            picker = Picker()  # 实例化拣货员对象
             picker.pick_points = self.pick_points_list  # 拣货员负责的拣货位列表
             picker.position = picker.initial_position  # 根据负责的拣货位列表中的拣货位的坐标计算拣货员的初始位置
             self.pickers_list.append(picker)  # 将拣货员加入到拣货员列表中
@@ -420,32 +421,10 @@ class WarehouseEnv(Config):
 
 if __name__ == "__main__":
     # 初始化仓库环境
-    N_l = 10  # 单个货架中储货位的数量
-    N_w = 6  # 巷道的数量
-    S_l = 1  # 储货位的长度
-    S_w = 1  # 储货位的宽度
-    S_b = 2  # 底部通道的宽度
-    S_d = 2  # 仓库的出入口处的宽度
-    S_a = 2  # 巷道的宽度
-    depot_position = (0, 0)  # 机器人的起始位置
-    # 机器人数量
-    N_robots = 10
-    # 拣货员数量
-    N_pickers = 5
-
-    # 初始化仓库环境
-    warehouse = WarehouseEnv(N_l, N_w, S_l, S_w, S_b, S_d, S_a, N_robots, N_pickers, depot_position)
-
-    # # 基于仓库中的商品创建一个订单对象，每个订单包含多个商品，订单到达时间服从泊松分布
-    # total_orders = 100  # 订单总数
-    # # 订单到达泊松分布参数
-    # poisson_parameter = 60  # 泊松分布参数, 60秒一个订单到达
-    # # 生成一个月内的订单数据，并保存到orders.pkl和orders.csv文件中
-    # generate_orders = GenerateData(warehouse, total_orders, poisson_parameter)  # 生成订单数据对象
-    # generate_orders.generate_orders()  # 生成一个月内的订单数据
+    warehouse = WarehouseEnv()
 
     # 读取订单数据，orders.pkl文件中
-    with open("../data/orders.pkl", "rb") as f:
+    with open("../data/data/instances/orders_100.pkl", "rb") as f:
         orders = pickle.load(f)
 
     # 基于订单数据和仓库环境数据，实现仓库环境的仿真
@@ -463,6 +442,6 @@ if __name__ == "__main__":
         # 仓库环境的仿真步进函数
         state, reward, done = warehouse.step(action)
         # 输出当前状态
-        print(f"Current state: {warehouse.state}")
+        # print(f"Current state: {warehouse.state}")
         print(f"Current time: {warehouse.current_time}")  # 当前时间
-        print("-----------------------------------------------------------------------------------------------------------------------------------------------")
+        print("--------------------------------------------------------------------------")

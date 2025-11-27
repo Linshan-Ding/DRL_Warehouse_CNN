@@ -22,10 +22,8 @@ class Config:
                 "shelf_capacity": 20,
                 # 货架层数
                 "shelf_levels": 3,
-                # 仓库区域数量
-                "area_num": 3,
-                # 仓库每个区域中巷道数量
-                "aisle_num": 3,
+                # 巷道数量
+                "aisle_num": 9,
                 # 储货位的长度
                 "shelf_length": 1,
                 # 储货位的宽度
@@ -36,26 +34,20 @@ class Config:
                 "entrance_width": 2,
                 # 巷道的宽度
                 "aisle_width": 2,
-                # depot_position: 机器人的起始位置
+                # 机器人的起始位置
                 "depot_position": (18, 0)
             },
             "robot": {
-                # 短租机器人单位运行成本
-                "short_term_unit_run_cost": 110/(3600*8),
-                # 长租机器人单位运行成本
-                "long_term_unit_run_cost": 1000000/(3600*8*30*8*365),
                 # 机器人移动速度 m/s
-                "robot_speed": 3.0
+                "robot_speed": 3.0,
+                # 机器人数量
+                "robot_num": 5
             },
             "picker": {
-                # 短租拣货员单位时间雇佣成本 元/秒
-                "short_term_unit_time_cost": 360/(3600*8),
-                # 长租拣货员单位时间雇佣成本 元/秒
-                "long_term_unit_time_cost": 7000/(3600*8*30),
                 # 拣货员移动速度 m/s
                 "picker_speed": 0.75,
-                # 拣货员辞退成本 元
-                "unit_fire_cost": 0
+                # 拣货员数量
+                "picker_num": 3
             },
             "order": {
                 # 订单单位延期成本 元/秒
@@ -69,7 +61,7 @@ class Config:
                 # 每次到达的订单数量范围 个
                 "order_n_arrival": (1, 10),  # 个
                 # 单个订单包含的商品数量范围 个
-                "order_n_items": (10, 30)  # 个
+                "order_n_items": (1, 10)  # 个
             },
             "item": {
                 # 商品拣选时间

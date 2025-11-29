@@ -210,11 +210,18 @@ class WarehouseEnv(gym.Env, Config):
                 self.pick_points[point_id] = pick_point
                 self.pick_points_list.append(pick_point)
 
-    def shortest_path_between_pick_points(self, entity, target):
-        # 曼哈顿距离
-        p1 = entity.position
-        p2 = target.position if hasattr(target, 'position') else target
-        return abs(p1[0] - p2[0]) + abs(p1[1] - p2[1])
+    def shortest_path_between_pick_points(self, point1, point2):
+        x1, y1 = point1.position
+        x2, y2 = point2.position
+        # 如果两个拣货位在同一巷道，则返回两个拣货位之间的直线路径长度
+        if x1 == x2:
+            return abs(y1 - y2)
+        # 计算从上部绕过和从下部绕过的路径，选择最短路径，并返回路径长度
+        else:
+            path1 = abs(y1 - self.S_b / 2) + abs(y2 - self.S_b / 2) + abs(x1 - x2)
+            path2 = (abs(y1 - (self.S_b * 1.5 + self.N_l * self.S_l)) + abs(y2 - (self.S_b * 1.5 + self.N_l * self.S_l))
+                     + abs(x1 - x2))
+            return min(path1, path2)
 
     def adjust_resources(self):
         self.robots = [Robot(i, self.depot_position) for i in range(self.N_robots)]
@@ -375,12 +382,14 @@ class WarehouseEnv(gym.Env, Config):
                     r.move_to_depot_time = float('inf')
                     r.state = 'idle'
                     r.position = self.depot_position
-                    if r.order in self.orders_uncompleted:
-                        self.orders_uncompleted.remove(r.order)
-                        self.orders_completed.append(r.order)
-                    r.order = None
-                    r.pick_point = None
-                    # 状态置为 Idle，等待 RL 分配新订单
+                    if r.order is not None:
+                        r.order.complete_time = self.current_time
+                        if r.order in self.orders_uncompleted:
+                            self.orders_uncompleted.remove(r.order)
+                            self.orders_completed.append(r.order)
+                        r.order = None
+                        r.pick_point = None
+                        # 状态置为 Idle，等待 RL 分配新订单
 
     def step(self, action):
         """
@@ -451,14 +460,46 @@ class WarehouseEnv(gym.Env, Config):
 
         # 3. 推进环境
         self.time_to_next_decision_point()
+        # 更新状态
+        self.state = self.state_extractor()
+        # 计算已到达订单的总延期成本
+        self.compute_reward()
 
-        return self.state_extractor(), 0, self.done, False, {}
+        return self.state_extractor(), self.state, self.done, False, {}
 
     def state_extractor(self):
         # 返回状态：简单示例，实际 RL 需要更丰富的特征
         # 例如：[Robot排队长度矩阵, 拣货员位置, 机器人位置/状态]
         queue_lengths = np.array([len(pp.robot_queue) for pp in self.pick_points.values()], dtype=np.float32)
-        return queue_lengths
+        # picker在位数组，有picker为1，否则为0,M_p
+        picker_list = np.array([0 if point.picker is None else 1 for point in self.pick_points.values()],dtype=np.float32)
+        # 已分配订单未完成拣选的货物统计
+        unpicked_items_list = np.array([self.unpicked_count[pp.point_id] for pp in self.pick_points_list],dtype=np.float32)
+        # 未分配订单未完成的货物统计
+        unassigned_items_list = np.array([self.unassigned_count[pp.point_id] for pp in self.pick_points_list],dtype=np.float32)
+
+        return queue_lengths, picker_list, unpicked_items_list, unassigned_items_list
+
+    def compute_reward(self):
+
+        total_costs = []
+
+        for o in self.orders:
+            arrive_time = o.arrive_time
+
+            if o.complete_time is not None:
+                # 完成订单 → 用真实完成时间
+                finish_time = o.complete_time
+            else:
+                # 未完成订单 → 用当前时间作为“暂时完成时间”
+                finish_time = self.current_time
+
+            total = finish_time - arrive_time
+            total_costs.append(total * o.unit_delay_cost)
+
+        reward = - np.mean(total_costs)
+
+        return reward
 
     # --- 辅助属性 ---
     @property
@@ -478,6 +519,28 @@ class WarehouseEnv(gym.Env, Config):
     def robots_needing_planning(self):
         # 返回需要规划下一个点的机器人 (已有订单且Idle)
         return [r for r in self.robots if r.state == 'idle' and r.order is not None]
+
+    @property
+    def unpicked_count(self):
+        count = {pp.point_id: 0 for pp in self.pick_points_list}
+        for order in self.orders_uncompleted:
+            for item in order.unpicked_items:
+                if item is None:
+                    continue
+                pid = item.pick_point_id
+                count[pid] += 1
+        return count
+
+    @property
+    def unassigned_count(self):
+        count = {pp.point_id: 0 for pp in self.pick_points_list}
+        for order in self.orders_unassigned:
+            for item in order.unpicked_items:
+                if item is None:
+                    continue
+                pid = item.pick_point_id
+                count[pid] += 1
+        return count
 
 
 # ==========================================

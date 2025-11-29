@@ -1,12 +1,13 @@
 """
 生成仿真订单数据和算例数据
 """
-from environment.class_public import Order
+from environment.class_object import Order
 import random
 import copy
 import csv
 import pickle
 from datetime import datetime
+from environment.warehouse import WarehouseEnv
 
 class GenerateData:
     """
@@ -50,7 +51,12 @@ class GenerateData:
                     })
 
         # 保存订单列表到pickle文件
-        with open("orders.pkl", "wb") as f:
+        with open(f"orders_{self.poisson_parameter}.pkl", "wb") as f:
             pickle.dump(orders, f)
 
         print(f"Total number of orders: {len(orders)}")
+
+if __name__ == 'main':
+    warehouse = WarehouseEnv
+    generator = GenerateData(warehouse, total_orders=100, poisson_parameter=100)
+    generator.generate_orders()

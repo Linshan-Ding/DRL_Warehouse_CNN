@@ -183,7 +183,8 @@ class WarehouseEnv(gym.Env, Config):
         self.orders_uncompleted = []
         self.orders_completed = []
 
-        self.current_time = 0
+        self.current_time = 0.0
+        self.last_decision_time = 0.0
         self.done = False
 
     def create_warehouse_graph(self):
@@ -457,47 +458,53 @@ class WarehouseEnv(gym.Env, Config):
                 else:
                     # 异常或空动作
                     pass
-
         # 3. 推进环境
         self.time_to_next_decision_point()
-        # 更新状态
-        self.state = self.state_extractor()
         # 计算已到达订单的总延期成本
-        self.compute_reward()
-
-        return self.state_extractor(), self.state, self.done, False, {}
+        reward = self.compute_reward()
+        # 更新状态
+        state = self.state_extractor()
+        done = self.done
+        return state, reward, done, False, {}
 
     def state_extractor(self):
-        # 返回状态：简单示例，实际 RL 需要更丰富的特征
-        # 例如：[Robot排队长度矩阵, 拣货员位置, 机器人位置/状态]
-        queue_lengths = np.array([len(pp.robot_queue) for pp in self.pick_points.values()], dtype=np.float32)
-        # picker在位数组，有picker为1，否则为0,M_p
-        picker_list = np.array([0 if point.picker is None else 1 for point in self.pick_points.values()],dtype=np.float32)
-        # 已分配订单未完成拣选的货物统计
-        unpicked_items_list = np.array([self.unpicked_count[pp.point_id] for pp in self.pick_points_list],dtype=np.float32)
-        # 未分配订单未完成的货物统计
-        unassigned_items_list = np.array([self.unassigned_count[pp.point_id] for pp in self.pick_points_list],dtype=np.float32)
+        # # 返回状态：简单示例，实际 RL 需要更丰富的特征
+        # # 例如：[Robot排队长度矩阵, 拣货员位置, 机器人位置/状态]
+        # queue_lengths = np.array([len(pp.robot_queue) for pp in self.pick_points.values()], dtype=np.float32)
+        # # picker在位数组，有picker为1，否则为0,M_p
+        # picker_list = np.array([0 if point.picker is None else 1 for point in self.pick_points.values()],dtype=np.float32)
+        # # 已分配订单未完成拣选的货物统计
+        # unpicked_items_list = np.array([self.unpicked_count[pp.point_id] for pp in self.pick_points_list],dtype=np.float32)
+        # # 未分配订单未完成的货物统计
+        # unassigned_items_list = np.array([self.unassigned_count[pp.point_id] for pp in self.pick_points_list],dtype=np.float32)
+        H = self.N_w
+        W = self.N_l
 
-        return queue_lengths, picker_list, unpicked_items_list, unassigned_items_list
+        M_queue = np.zeros((H, W), dtype=np.float32)
+        M_picker = np.zeros((H, W), dtype=np.float32)
+        M_unpicked = np.zeros((H, W), dtype=np.float32)
+        M_unassigned = np.zeros((H, W), dtype=np.float32)
+
+        for pp in self.pick_points_list:
+            w, l = map(int, pp.point_id.split('-'))
+            i, j = w - 1, l - 1
+
+            M_queue[i, j] = len(pp.robot_queue)
+            M_picker[i, j] = 0 if pp.picker is None else 1
+            M_unpicked[i, j] = self.unpicked_count[pp.point_id]
+            M_unassigned[i, j] = self.unassigned_count[pp.point_id]
+
+        return np.stack(
+            [M_queue, M_picker, M_unpicked, M_unassigned],
+            axis=0
+        )  # (4,H,W)
 
     def compute_reward(self):
 
-        total_costs = []
-
-        for o in self.orders:
-            arrive_time = o.arrive_time
-
-            if o.complete_time is not None:
-                # 完成订单 → 用真实完成时间
-                finish_time = o.complete_time
-            else:
-                # 未完成订单 → 用当前时间作为“暂时完成时间”
-                finish_time = self.current_time
-
-            total = finish_time - arrive_time
-            total_costs.append(total * o.unit_delay_cost)
-
-        reward = - np.mean(total_costs)
+        c_now = self.current_time
+        c_pre = self.last_decision_time
+        reward = c_pre - c_now
+        self.last_decision_time = c_now
 
         return reward
 

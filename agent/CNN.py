@@ -1,50 +1,54 @@
 import torch.nn as nn
 
+
+def _group_norm(num_channels: int) -> nn.Module:
+
+    preferred = [32, 16, 8, 4, 2, 1]
+    for g in preferred:
+        if num_channels % g == 0:
+            return nn.GroupNorm(g, num_channels)
+    return nn.GroupNorm(1, num_channels)
+
 class CNNFeatureExtractor(nn.Module):
     """
-    深层卷积特征提取器 - 无区域划分版本
-    输入: [batch_size, 4, H, W]
-    输出: [batch_size, feature_dim]
+    输入:  [batch_size, 4, H, W]
+    输出:  [batch_size, feature_dim]
     """
 
-    def __init__(self, input_channels=4, feature_dim=256):
-        super(CNNFeatureExtractor, self).__init__()
+    def __init__(self, input_channels: int = 4, feature_dim: int = 256):
+        super().__init__()
 
-        # 深层卷积主干
         self.conv_layers = nn.Sequential(
             nn.Conv2d(input_channels, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.BatchNorm2d(64),
+            _group_norm(64),
 
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.BatchNorm2d(128),
-            nn.MaxPool2d(2),  # -> 尺寸减半
+            _group_norm(128),
+            nn.MaxPool2d(2),
 
             nn.Conv2d(128, 256, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.BatchNorm2d(256),
+            _group_norm(256),
 
             nn.Conv2d(256, 512, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.BatchNorm2d(512),
-            nn.MaxPool2d(2),  # -> 再次减半
+            _group_norm(512),
+            nn.MaxPool2d(2),
 
-            nn.AdaptiveAvgPool2d((1, 1))  # 全局平均池化
+            nn.AdaptiveAvgPool2d((1, 1)),
         )
 
-        # 全连接层
         self.fc_layers = nn.Sequential(
             nn.Linear(512, 1024),
             nn.ReLU(),
-            nn.Dropout(0.3),
             nn.Linear(1024, feature_dim),
             nn.ReLU(),
-            nn.Dropout(0.2)
         )
 
     def forward(self, x):
         x = self.conv_layers(x)
-        x = x.view(x.size(0), -1)  # 展平
+        x = x.view(x.size(0), -1)
         x = self.fc_layers(x)
         return x

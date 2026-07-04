@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 from CNN import CNNFeatureExtractor
 from conj import config
-from env.env_test_debug_v2 import WarehouseEnv
+from env.env_I import WarehouseEnv
 
 # 添加 Visdom 导入
 try:
@@ -33,13 +33,21 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 训练数据保存路径（.npz）
 TRAINING_DATA_PATH = os.path.abspath(os.path.join(
-    BASE_DIR, "..", "results", "PPO", "PPO_lambda20", "p2r2", "PPO_I_p2r2_training_data.npz"
+    BASE_DIR, "..", "results", "SAPPO", "SAPPO_lambda20", "p2r6", "SAPPO_I_p2r6_training_data.npz"
+))
+# 论文用图保存目录（PNG）
+FIGURES_DIR = os.path.abspath(os.path.join(
+    BASE_DIR, "..", "results", "SAPPO", "SAPPO_lambda20", "p2r6"
 ))
 
+# # 训练数据保存路径（.npz）
+# TRAINING_DATA_PATH = os.path.abspath(os.path.join(
+#     BASE_DIR, "..", "revise","w6l20","PPO_w6l20.npz"
+# ))
 # # 论文用图保存目录（PNG）
-FIGURES_DIR = os.path.abspath(os.path.join(
-    BASE_DIR, "..", "results", "PPO", "PPO_lambda20", "p2r2"
-))
+# FIGURES_DIR = os.path.abspath(os.path.join(
+#     BASE_DIR, "..", "revise","PPO_w6l20"
+# ))
 
 print("[PATH] CWD =", os.getcwd())
 print("[PATH] __file__ =", os.path.abspath(__file__))
@@ -62,11 +70,11 @@ class PolicyNetwork(nn.Module):
         self.cnn = CNNFeatureExtractor(4, cfg.cnn_output_dim).to(self.device)
 
         self.mlp = nn.Sequential(
-            nn.Linear(cfg.cnn_output_dim, 512), # 原先256
+            nn.Linear(cfg.cnn_output_dim, 2048), # 原先256
             nn.ReLU(),
-            nn.Linear(512, 512),
+            nn.Linear(2048, 2048),
             nn.ReLU(),
-            nn.Linear(512, action_num)  # 输出所有动作的得分
+            nn.Linear(2048, action_num)  # 输出所有动作的得分
         )
 
     def forward(self, state):
@@ -93,9 +101,9 @@ class ValueNetwork(nn.Module):
 
         # 价值头
         self.value_head = nn.Sequential(
-            nn.Linear(cfg.cnn_output_dim, 256),
+            nn.Linear(cfg.cnn_output_dim, 1024),
             nn.ReLU(),
-            nn.Linear(256, 1)
+            nn.Linear(1024, 1)
         )
 
     def forward(self, state):  # state_tensor:[B,4,H,W]
@@ -335,12 +343,24 @@ class PPOAgent:
 
         # 标准化advantages
         advantages = np.array(advantages, dtype=np.float32)
-
+        # print(
+        #     "[GAE raw] mean:", advantages.mean(),
+        #     "std:", advantages.std(),
+        #     "min:", advantages.min(),
+        #     "max:", advantages.max()
+        # )
         if advantages.std() > 0:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
             advantages = np.clip(advantages, -5.0, 5.0) # 改
 
-        # print(f"reward mean: {sum(rewards) / len(rewards)}")
+        # print(
+        #     "[GAE raw] mean:", advantages.mean(),
+        #     "std:", advantages.std(),
+        #     "min:", advantages.min(),
+        #     "max:", advantages.max()
+        # )
+
+        print(f"reward mean: {sum(rewards) / len(rewards)}")
 
         return returns, advantages.tolist()
 
@@ -543,7 +563,7 @@ def evaluate_greedy(agent, n_eval_episodes=3, max_steps=5000, orders_path="../da
 
     return order_processing_times
 
-def train(agent, env, n_episodes=40, max_steps=5000):
+def train(agent, env, n_episodes=2000, max_steps=5000):
     """训练函数（记录并保存论文用数据与PNG图）。"""
 
     # 初始化Visdom
@@ -590,7 +610,6 @@ def train(agent, env, n_episodes=40, max_steps=5000):
 
             total_step = -1
             state = env.reset(orders)
-
             ep_reward = 0.0
             legal_cnts = []
             r_pick_list = []
@@ -677,7 +696,7 @@ def train(agent, env, n_episodes=40, max_steps=5000):
                     agent,
                     n_eval_episodes=n_eval_episodes,
                     max_steps=max_steps,
-                    orders_path="../data/data/instances/orders_20.pkl"
+                    orders_path="../data/data/instances/orders_40_w6l20.pkl"
                 )
                 m = float(np.mean(flows))
                 s = float(np.std(flows))

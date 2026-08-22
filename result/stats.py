@@ -122,6 +122,27 @@ def paired_tests(frame: pd.DataFrame, reference: str = REFERENCE_METHOD) -> pd.D
     return pd.DataFrame(rows)
 
 
+def write_summary(result_dir: str = "result", pattern: str = "*",
+                  reference: str = REFERENCE_METHOD,
+                  out: str | None = None) -> str:
+    """Aggregate, test, print and write the summary; returns the output path."""
+    frame = load_results(result_dir, pattern)
+    summary = summarise_methods(frame)
+    tests = paired_tests(frame, reference)
+
+    out = out or os.path.join(result_dir, "stats_summary.csv")
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    pd.concat([summary.assign(block="per_method"),
+               tests.assign(block="paired_test")], ignore_index=True).to_csv(out, index=False)
+
+    print(summary.to_string(index=False))
+    if not tests.empty:
+        print()
+        print(tests.to_string(index=False))
+    print(f"\nwritten -> {out}")
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--result-dir", default="result")
@@ -130,22 +151,7 @@ def main() -> None:
     parser.add_argument("--reference", default=REFERENCE_METHOD)
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
-
-    frame = load_results(args.result_dir, args.pattern)
-    summary = summarise_methods(frame)
-    tests = paired_tests(frame, args.reference)
-
-    out = args.out or os.path.join(args.result_dir, "stats_summary.csv")
-    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-    combined = pd.concat([summary.assign(block="per_method"),
-                          tests.assign(block="paired_test")], ignore_index=True)
-    combined.to_csv(out, index=False)
-
-    print(summary.to_string(index=False))
-    if not tests.empty:
-        print()
-        print(tests.to_string(index=False))
-    print(f"\nwritten -> {out}")
+    write_summary(args.result_dir, args.pattern, args.reference, args.out)
 
 
 if __name__ == "__main__":

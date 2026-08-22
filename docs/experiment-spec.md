@@ -10,6 +10,7 @@ Section 3 it should not appear in the paper.
 | Version | 1.0 |
 | Status | active |
 | Paper | *Spatially-Aware Deep Reinforcement Learning for Human-Robot Collaborative Order Picking Optimization in Smart Warehouse Systems* (CAIE, second revision) |
+| How to run | `README.md` (Chinese) / `README_EN.md` (English); one ready-to-run script per experiment under `experiments/` |
 
 ### Change log
 

@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.idea/
+.vscode/
+.DS_Store
+
+# Run outputs: logs, checkpoints and figures are produced locally.
+# The modules that live in result/ are tracked; the run directories are not.
+result/*/
+!result/figs/
+result/stats_summary.csv

@@ -4,10 +4,8 @@
 
 对应论文: 5.3 节的 MQ-ND / MQ-MinRQ / MQ-MI / MI-MinRQ / MI-MI
 
+产出: result/rules_main/eval_results.csv
 耗时: 约 2 分钟。
-等价的终端命令:
-    python eval.py --methods MQ-ND MQ-MinRQ MQ-MI MI-MinRQ MI-MI \
-                   --tiers main --run-id 1 --run-name rules_main
 """
 import _bootstrap  # noqa: F401  必须最先导入
 

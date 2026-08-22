@@ -3,11 +3,8 @@
 这不是实验: 训练轮数太少，学不到任何东西。它只回答一个问题——
 "data -> train -> eval -> CSV 这条链路在我这台机器上通不通"。
 
+产出: result/smoke_run1/{log.csv, eval_results.csv, training_cost.csv, checkpoint_best.pt}
 耗时: 约 2-3 分钟。
-等价的终端命令:
-    python train.py --config configs/exp/smoke.yaml --run-name smoke
-    python eval.py --ckpt result/smoke/checkpoint_best.pt --methods SAPPO MQ-ND \
-                   --tiers main --run-name smoke
 """
 import _bootstrap  # noqa: F401  必须最先导入
 

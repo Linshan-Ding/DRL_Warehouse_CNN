@@ -1,13 +1,12 @@
 """实验脚本的公共执行逻辑。
 
-这里不重复实现任何东西，只是把命令行入口串起来：
+这里不重复实现任何东西，只是把各模块串起来：
 
 * ``data.dataset.make_eval_instances`` 生成固定算例
 * ``train.train``                     训练并存 checkpoint
 * ``eval.evaluate``                   在固定算例上评测并写 eval_results.csv
 
-因此"右键运行脚本"和"终端敲命令"跑的是同一套代码、产出同样的文件。每次调用都会
-把等价的终端命令打印出来，方便在两种方式之间对照。
+各实验脚本只负责声明"用哪个配置、跑几次、评哪些方法"，具体流程都在这里。
 """
 from __future__ import annotations
 
@@ -30,21 +29,6 @@ _LINE = "=" * 78
 
 def banner(title: str, detail: str = "") -> None:
     print(f"\n{_LINE}\n{title}" + (f"\n{detail}" if detail else "") + f"\n{_LINE}")
-
-
-def _equivalent_commands(overlays: Sequence[str], run_name: str, episodes: Optional[int],
-                         methods: Sequence[str], tiers: Sequence[str],
-                         run_id: int, train_first: bool) -> List[str]:
-    config_part = (" --config " + " ".join(overlays)) if overlays else ""
-    episode_part = f" --algo.n_episodes {episodes}" if episodes else ""
-    commands = []
-    if train_first:
-        commands.append(f"python train.py{config_part} --run-name {run_name}{episode_part}")
-    ckpt_part = (f" --ckpt result/{run_name}/checkpoint_best.pt" if train_first else "")
-    commands.append(
-        f"python eval.py{config_part}{ckpt_part} --methods {' '.join(methods)} "
-        f"--tiers {' '.join(tiers)} --run-id {run_id} --run-name {run_name}")
-    return commands
 
 
 def run_experiment(name: str,
@@ -83,13 +67,12 @@ def run_experiment(name: str,
         cfg.run.run_name = run_name
 
         banner(f"[{name}] 第 {run_id}/{runs} 次运行 -> result/{run_name}",
-               f"配置: {' + '.join(overlays) if overlays else '默认'}\n"
-               f"资源: K={cfg.env.n_pickers} R={cfg.env.n_robots} C={cfg.env.robot_capacity} "
-               f"通道={cfg.env.state_channels} gamma={cfg.algo.gamma} "
-               f"tau_pick={cfg.env.pick_time} 布局={cfg.env.layout}\n"
-               f"等价的终端命令:\n  " + "\n  ".join(
-                   _equivalent_commands(overlays, run_name, episodes, methods, tiers,
-                                        run_id, train_first)))
+               f"配置文件: {' + '.join(overlays) if overlays else '默认'}\n"
+               f"资源设置: K={cfg.env.n_pickers} R={cfg.env.n_robots} "
+               f"C={cfg.env.robot_capacity} 通道={cfg.env.state_channels}\n"
+               f"算法设置: gamma={cfg.algo.gamma} tau_pick={cfg.env.pick_time} "
+               f"布局={cfg.env.layout} 训练轮数={cfg.algo.n_episodes}\n"
+               f"评测方法: {', '.join(methods)}   档位: {', '.join(tiers)}")
 
         make_eval_instances(cfg)
 

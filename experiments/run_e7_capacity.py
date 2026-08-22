@@ -10,13 +10,9 @@ C=1 时 F = 1892.17，C=2 时 F = 1948.98，反而变差 3%——C 变大会拉�
 若不配套路径优化，F 未必单调改善。这本身是有价值的发现，但写回复信时不能提前
 假定"性能随 C 提升"，要等这个实验的 SAPPO 结果出来再定调。
 
+产出: result/e7_c2_run*/、result/e7_c3_run*/ 下的 eval_results.csv
+随后: 右键运行 run_stats_and_plots.py，SENSITIVITY_COLUMN 设为 "robot_capacity"
 耗时: 两个配置各一次训练，约 18-24 小时（CPU）。
-等价的终端命令（对每个配置）:
-    python train.py --config configs/exp/e7_capacity_2.yaml --run-name e7_c2_run1
-    python eval.py --config configs/exp/e7_capacity_2.yaml \
-                   --ckpt result/e7_c2_run1/checkpoint_best.pt \
-                   --methods SAPPO MQ-ND MQ-MinRQ MQ-MI MI-MinRQ MI-MI \
-                   --tiers main --run-id 1 --run-name e7_c2_run1
 """
 import _bootstrap  # noqa: F401  必须最先导入
 

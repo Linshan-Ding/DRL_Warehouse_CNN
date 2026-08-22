@@ -8,8 +8,8 @@ result/ 下所有的汇总成一张表，列出动作空间大小、参数量、
 所以每个配置都是从零单独训练的，不存在跨规模的权重迁移。表里的 n_actions 一列
 就是这句话的证据。
 
+产出: result/training_cost_summary.csv
 耗时: 几秒。
-等价的终端命令: 见 README 第 7 节 E3 一栏的 Python 片段。
 """
 import _bootstrap  # noqa: F401  必须最先导入
 

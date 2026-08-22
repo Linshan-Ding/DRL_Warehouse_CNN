@@ -7,13 +7,9 @@
 把 tau_pick 从 10 s 提到 15 s、20 s，就是"从更高层取货"的代理实验，用来说明
 取件时间上升时 SAPPO 相对基线的优势是否还保持得住。
 
+产出: result/e6_tau15_run*/、result/e6_tau20_run*/ 下的 eval_results.csv
+随后: 右键运行 run_stats_and_plots.py，SENSITIVITY_COLUMN 设为 "pick_time"
 耗时: 两个配置各一次训练，约 18-24 小时（CPU）。
-等价的终端命令（对每个配置）:
-    python train.py --config configs/exp/e6_picktime_15.yaml --run-name e6_tau15_run1
-    python eval.py --config configs/exp/e6_picktime_15.yaml \
-                   --ckpt result/e6_tau15_run1/checkpoint_best.pt \
-                   --methods SAPPO MQ-ND MQ-MinRQ MQ-MI MI-MinRQ MI-MI \
-                   --tiers main --run-id 1 --run-name e6_tau15_run1
 """
 import _bootstrap  # noqa: F401  必须最先导入
 

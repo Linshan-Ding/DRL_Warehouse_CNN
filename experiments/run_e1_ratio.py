@@ -11,13 +11,9 @@
 注意每个 (K,R) 都要单独训练: actor 输出层维度是 K*N_w*N_l + R*(N_w*N_l+1)，
 换了资源配置就换了网络结构，权重不可能跨配置复用。
 
+产出: result/e1_k1r1_run*/、result/e1_k3r1_run*/、result/e1_k4r2_run*/ 下的
+      eval_results.csv（含 n_pickers、n_robots 两列，可直接按配比重排成表）
 耗时: 每个配置一次训练，三个配置约 27-36 小时（CPU）。
-等价的终端命令（对每个配置）:
-    python train.py --config configs/exp/e1_ratio_k1_r1.yaml --run-name e1_k1r1_run1
-    python eval.py --config configs/exp/e1_ratio_k1_r1.yaml \
-                   --ckpt result/e1_k1r1_run1/checkpoint_best.pt \
-                   --methods SAPPO MQ-ND MQ-MinRQ MQ-MI MI-MinRQ MI-MI \
-                   --tiers main --run-id 1 --run-name e1_k1r1_run1
 """
 import _bootstrap  # noqa: F401  必须最先导入
 

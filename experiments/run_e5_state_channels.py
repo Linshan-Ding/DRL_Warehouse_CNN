@@ -12,12 +12,9 @@ plus_agent 通道集就是把这部分信息也摆到网络面前:
     提升很小   -> 支撑"四通道 + 掩码已经充分"的论证
     提升明显   -> 据实报告并把它写进正文（结论被推翻也是合法产出，而且是更好的论文）
 
+产出: result/e5_plus_run*/eval_results.csv（含 state_channels 一列）
+随后: 右键运行 run_stats_and_plots.py，把 PATTERN 设为 "e[05]_*" 一起看两组
 耗时: RUNS 次训练，默认 3 次约 1-1.5 天（CPU）。对照组直接用 E0 的结果，不必重跑。
-等价的终端命令:
-    python train.py --config configs/exp/e5_state_plus_agent.yaml --run-name e5_plus_run1
-    python eval.py --config configs/exp/e5_state_plus_agent.yaml \
-                   --ckpt result/e5_plus_run1/checkpoint_best.pt \
-                   --methods SAPPO --tiers main --run-id 1 --run-name e5_plus_run1
 """
 import _bootstrap  # noqa: F401  必须最先导入
 

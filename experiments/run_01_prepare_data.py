@@ -7,7 +7,6 @@
 那三条，随仓库一起提交，所以新克隆下来会直接复用而不是重新生成。
 
 耗时: 几秒。
-等价的终端命令: python -m data.dataset
 """
 import _bootstrap  # noqa: F401  必须最先导入
 

@@ -10,11 +10,8 @@
 
 只想看某一组实验就改 PATTERN，例如 "e4_*" 只看折扣因子消融。
 
+产出: result/stats_summary.csv 与 result/figures/*.pdf|.png
 耗时: 几秒到一分钟。
-等价的终端命令:
-    python -m result.stats --pattern "*"
-    python -m result.plot --pattern "*"
-    python -m result.figs.state_illustration --out result/figures
 """
 import _bootstrap  # noqa: F401  必须最先导入
 

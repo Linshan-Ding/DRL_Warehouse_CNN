@@ -6,12 +6,9 @@
 配合 E3 产出的训练成本数据，可以用"决策时间与训练时长随规模的增长曲线"来回答
 可扩展性，而不是只多两行数字。
 
+产出: result/e2_k8r16_run*/、result/e2_k10r20_run*/ 下的 eval_results.csv
+      与 training_cost.csv
 耗时: 每个配置一次训练；规模越大单步越慢，两个配置约 20-30 小时（CPU）。
-等价的终端命令（对每个配置）:
-    python train.py --config configs/exp/e2_scale_k8_r16.yaml --run-name e2_k8r16_run1
-    python eval.py --config configs/exp/e2_scale_k8_r16.yaml \
-                   --ckpt result/e2_k8r16_run1/checkpoint_best.pt \
-                   --methods SAPPO MQ-ND --tiers main --run-id 1 --run-name e2_k8r16_run1
 """
 import _bootstrap  # noqa: F401  必须最先导入
 

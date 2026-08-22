@@ -10,7 +10,7 @@ Section 3 it should not appear in the paper.
 | Version | 1.0 |
 | Status | active |
 | Paper | *Spatially-Aware Deep Reinforcement Learning for Human-Robot Collaborative Order Picking Optimization in Smart Warehouse Systems* (CAIE, second revision) |
-| How to run | `README.md` (Chinese) / `README_EN.md` (English); one ready-to-run script per experiment under `experiments/` |
+| How to run | right-click Run on a script under `experiments/`; see `README.md` (Chinese) / `README_EN.md` (English) |
 
 ### Change log
 
@@ -72,8 +72,8 @@ reproduces the submitted model event for event.
 
 ### 2.2 Instance tiers
 
-Materialised once by `python -m data.dataset`, one CSV per stream, never
-regenerated. **These files, not a random seed, are the reproduction baseline** —
+Materialised once by `experiments/run_01_prepare_data.py`, one CSV per stream,
+never regenerated. **These files, not a random seed, are the reproduction baseline** —
 no seed is fixed anywhere in the project, and independent repetitions come from
 repeated training runs.
 
@@ -128,14 +128,14 @@ Section 5.5 of the manuscript (`result/stats.py`).
 
 | File | Produced by | Key columns |
 |---|---|---|
-| `data/instances/<tier>/*.csv` | `data.dataset` | `order_id, arrival_time, item_id, pick_point_id` |
-| `data/instances/index.csv` | `data.dataset` | `instance_id, tier, mean_interarrival, n_orders, n_rows, path` |
-| `result/<run>/log.csv` | `train.py` | `step, episode, mean_flow_time, reward_sum, n_decisions, policy_loss, value_loss, entropy, approx_kl, clip_fraction, sps, wall_clock_s, gpu_mem_gb, eval_flow_mean, eval_flow_std` |
-| `result/<run>/training_cost.csv` | `train.py` | `n_actions, n_parameters, n_episodes, total_decisions, wall_clock_s, decisions_per_second, device` + configuration |
-| `result/<run>/eval_results.csv` | `eval.py` | `instance_id, tier, mean_interarrival, case_id, method, run_id, n_pickers, n_robots, robot_capacity, state_channels, layout, pick_time, gamma, mean_flow_time, makespan, n_decisions, decision_time_ms, sim_time_per_decision, solve_wall_clock_s` |
-| `result/<run>/config_snapshot.yaml`, `run_info.json` | `train.py` | effective configuration, git commit, device |
-| `result/stats_summary.csv` | `result.stats` | per-method summary and paired tests |
-| `result/figures/*.pdf/.png` | `result.plot` | draft figures |
+| `data/instances/<tier>/*.csv` | `run_01_prepare_data.py` | `order_id, arrival_time, item_id, pick_point_id` |
+| `data/instances/index.csv` | `run_01_prepare_data.py` | `instance_id, tier, mean_interarrival, n_orders, n_rows, path` |
+| `result/<run>/log.csv` | any training script (E0–E8) | `step, episode, mean_flow_time, reward_sum, n_decisions, policy_loss, value_loss, entropy, approx_kl, clip_fraction, sps, wall_clock_s, gpu_mem_gb, eval_flow_mean, eval_flow_std` |
+| `result/<run>/training_cost.csv` | any training script; aggregated by `run_e3_training_cost.py` | `n_actions, n_parameters, n_episodes, total_decisions, wall_clock_s, decisions_per_second, device` + configuration |
+| `result/<run>/eval_results.csv` | every experiment script | `instance_id, tier, mean_interarrival, case_id, method, run_id, n_pickers, n_robots, robot_capacity, state_channels, layout, pick_time, gamma, mean_flow_time, makespan, n_decisions, decision_time_ms, sim_time_per_decision, solve_wall_clock_s` |
+| `result/<run>/config_snapshot.yaml`, `run_info.json` | any training script | effective configuration, git commit, device |
+| `result/stats_summary.csv` | `run_stats_and_plots.py` | per-method summary and paired tests |
+| `result/figures/*.pdf/.png` | `run_stats_and_plots.py` | draft figures |
 
 ---
 

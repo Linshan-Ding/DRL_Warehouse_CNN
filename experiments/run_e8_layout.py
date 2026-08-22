@@ -10,13 +10,8 @@
 参考数据: 规则 MQ-ND、lam40、K=3/R=6 下，加中部横通道后 F 从 1892.17 降到 1216.66，
 说明布局会显著影响绝对值，但方法本身不受影响。
 
+产出: result/e8_mid_run*/eval_results.csv（含 layout 一列）
 耗时: 一次训练，约 9-12 小时（CPU）。
-等价的终端命令:
-    python train.py --config configs/exp/e8_layout_mid_aisle.yaml --run-name e8_mid_run1
-    python eval.py --config configs/exp/e8_layout_mid_aisle.yaml \
-                   --ckpt result/e8_mid_run1/checkpoint_best.pt \
-                   --methods SAPPO MQ-ND MQ-MinRQ MQ-MI MI-MinRQ MI-MI \
-                   --tiers main --run-id 1 --run-name e8_mid_run1
 """
 import _bootstrap  # noqa: F401  必须最先导入
 

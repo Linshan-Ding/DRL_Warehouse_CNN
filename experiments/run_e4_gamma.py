@@ -12,12 +12,11 @@ telescoping 成 -F_final。gamma < 1 时按 Abel 分部求和有
 如果三者最终 F 的差异落在噪声内，这条意见就被证据关掉了；
 如果 gamma = 1.0 明显更好，那是个可以写进正文的正面发现。
 
+产出: result/e4_gamma0.95_run*/、e4_gamma0.99_run*/、e4_gamma1.00_run*/ 下的
+      eval_results.csv（含 gamma 一列）
+随后: 右键运行 run_stats_and_plots.py，把 PATTERN 设为 "e4_*"、
+      SENSITIVITY_COLUMN 设为 "gamma"
 耗时: 3 x RUNS 次训练，默认 9 次约 3-4 天（CPU）。算力紧张就把 RUNS 降到 2。
-等价的终端命令（对每个 gamma、每次重复）:
-    python train.py --config configs/exp/e4_gamma_0.95.yaml --run-name e4_gamma0.95_run1
-    python eval.py --config configs/exp/e4_gamma_0.95.yaml \
-                   --ckpt result/e4_gamma0.95_run1/checkpoint_best.pt \
-                   --methods SAPPO --tiers main --run-id 1 --run-name e4_gamma0.95_run1
 """
 import _bootstrap  # noqa: F401  必须最先导入
 

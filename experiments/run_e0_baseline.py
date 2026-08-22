@@ -6,13 +6,9 @@
 （论文 Table 5 的 C18: F = 1379.890）。把 RUNS 设为 3 就能看到这个范围。
 E0 复现不了的话，先查清原因，别急着跑后面的实验。
 
+产出: result/e0_run*/{log.csv, eval_results.csv, training_cost.csv,
+      checkpoint_best.pt, config_snapshot.yaml}
 耗时: 单次约 9-12 小时（CPU），GPU 上快很多。想先确认链路，把 EPISODES 设成 20。
-等价的终端命令:
-    python train.py --config configs/exp/e0_baseline.yaml --run-name e0_run1
-    python eval.py --config configs/exp/e0_baseline.yaml \
-                   --ckpt result/e0_run1/checkpoint_best.pt \
-                   --methods SAPPO MQ-ND MQ-MinRQ MQ-MI MI-MinRQ MI-MI \
-                   --tiers main --run-id 1 --run-name e0_run1
 """
 import _bootstrap  # noqa: F401  必须最先导入
 

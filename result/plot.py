@@ -133,18 +133,13 @@ def plot_sensitivity(frame: pd.DataFrame, x_column: str, out_stem: str) -> None:
     save(fig, out_stem)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--result-dir", default="result")
-    parser.add_argument("--pattern", default="*")
-    parser.add_argument("--figures-dir", default=None)
-    parser.add_argument("--sensitivity-column", default=None,
-                        help="e.g. robot_capacity, n_robots, pick_time, gamma")
-    args = parser.parse_args()
-
-    run_dirs = sorted(d for d in glob.glob(os.path.join(args.result_dir, args.pattern))
+def render_all(result_dir: str = "result", pattern: str = "*",
+               figures_dir: str | None = None,
+               sensitivity_column: str | None = None) -> str:
+    """Draw every figure the matched runs support; returns the figures directory."""
+    run_dirs = sorted(d for d in glob.glob(os.path.join(result_dir, pattern))
                       if os.path.isdir(d))
-    figures_dir = args.figures_dir or os.path.join(args.result_dir, "figures")
+    figures_dir = figures_dir or os.path.join(result_dir, "figures")
     print(f"{len(run_dirs)} run directory(ies) matched")
 
     print("training curves:")
@@ -156,13 +151,24 @@ def main() -> None:
         frame = pd.concat(frames, ignore_index=True)
         print("method comparison:")
         plot_method_comparison(frame, os.path.join(figures_dir, "method_comparison"))
-        if args.sensitivity_column:
-            print(f"sensitivity to {args.sensitivity_column}:")
-            plot_sensitivity(frame, args.sensitivity_column,
-                             os.path.join(figures_dir,
-                                          f"sensitivity_{args.sensitivity_column}"))
+        if sensitivity_column:
+            print(f"sensitivity to {sensitivity_column}:")
+            plot_sensitivity(frame, sensitivity_column,
+                             os.path.join(figures_dir, f"sensitivity_{sensitivity_column}"))
     else:
         print("no eval_results.csv found; only training curves were drawn")
+    return figures_dir
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--result-dir", default="result")
+    parser.add_argument("--pattern", default="*")
+    parser.add_argument("--figures-dir", default=None)
+    parser.add_argument("--sensitivity-column", default=None,
+                        help="e.g. robot_capacity, n_robots, pick_time, gamma")
+    args = parser.parse_args()
+    render_all(args.result_dir, args.pattern, args.figures_dir, args.sensitivity_column)
 
 
 if __name__ == "__main__":

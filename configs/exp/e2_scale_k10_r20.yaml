@@ -1,0 +1,9 @@
+# E2 -- larger fleets (Reviewer #1).
+# K = 10 pickers, R = 20 robots. Table 10 of the R1 revision stops at K=6/R=12;
+# these two settings extend the curve so that scalability can be read off a
+# trend rather than two extra numbers.
+env:
+  n_pickers: 10
+  n_robots: 20
+instance:
+  mean_interarrival: 40.0

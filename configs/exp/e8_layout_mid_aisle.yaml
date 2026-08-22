@@ -1,0 +1,8 @@
+# E8 -- layout variant with a middle cross-aisle (Reviewer #1, movement between racks).
+#
+# Eq. (2) already routes between aisles through the bottom or the top
+# cross-aisle. This overlay adds a third, middle cross-aisle to the distance
+# model, which is the layout feature that genuinely was not covered, and shows
+# that the conclusions do not depend on the two-cross-aisle assumption.
+env:
+  layout: three_cross_aisles

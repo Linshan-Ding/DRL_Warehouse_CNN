@@ -1,0 +1,11 @@
+# E0 -- baseline reproduction (gate for everything else).
+#
+# Case C18 of the manuscript: 1/lambda = 40, K = 3 pickers, R = 6 robots.
+# Train this first and check that the reported mean flow time lands in the
+# run-to-run range of the submitted value (Table 5, C18: F_bar = 1379.890).
+# If E0 does not reproduce, every other supplementary result is questionable.
+env:
+  n_pickers: 3
+  n_robots: 6
+instance:
+  mean_interarrival: 40.0

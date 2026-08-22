@@ -1,0 +1,9 @@
+instance_id,tier,mean_interarrival,n_orders,n_rows,path
+lam20,main,20.0,100,500,data/instances/main/lam20.csv
+lam40,main,40.0,100,500,data/instances/main/lam40.csv
+lam60,main,60.0,100,500,data/instances/main/lam60.csv
+val00,val,40.0,100,500,data/instances/val/val00.csv
+val01,val,40.0,100,500,data/instances/val/val01.csv
+val02,val,40.0,100,500,data/instances/val/val02.csv
+lam10,large,10.0,200,1000,data/instances/large/lam10.csv
+lam100,large,100.0,200,1000,data/instances/large/lam100.csv

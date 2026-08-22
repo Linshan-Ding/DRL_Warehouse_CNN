@@ -1,0 +1,11 @@
+# E5 -- state sufficiency ablation (Reviewer #2, comment 4).
+#
+# The four base channels aggregate everything per picking point, while the
+# action mask uses per-resource information (which robot still needs which
+# locations, which picker is idle). "plus_agent" adds two channels carrying
+# exactly that information -- the residual demand of the robots awaiting a
+# routing decision, and the positions of the idle resources -- so the value of
+# making it visible to the network can be measured instead of argued.
+# Compare against E0 (state_channels: base) at equal training budget.
+env:
+  state_channels: plus_agent

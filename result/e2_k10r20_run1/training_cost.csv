@@ -1,0 +1,2 @@
+run_name,n_aisles,n_positions,n_pickers,n_robots,robot_capacity,state_channels,gamma,n_actions,n_parameters,n_episodes,total_decisions,wall_clock_s,decisions_per_second,device
+e2_k10r20_run1,9,20,10,20,1,base,0.99,5420,20774829,2000,2183599,12520.368,174.404,cuda

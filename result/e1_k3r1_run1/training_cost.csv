@@ -1,0 +1,2 @@
+run_name,n_aisles,n_positions,n_pickers,n_robots,robot_capacity,state_channels,gamma,n_actions,n_parameters,n_episodes,total_decisions,wall_clock_s,decisions_per_second,device
+e1_k3r1_run1,9,20,3,1,1,base,0.99,721,11146578,2000,2184000,12241.797,178.405,cuda

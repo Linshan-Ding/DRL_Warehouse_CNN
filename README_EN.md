@@ -144,6 +144,8 @@ editing.
 | `run_e6_picktime.py` | τ_pick ∈ {15, 20} sensitivity | R1.4 |
 | `run_e7_capacity.py` | carrying capacity C ∈ {2, 3} | R1.5 |
 | `run_e8_layout.py` | middle cross-aisle layout | R1.3 |
+| `run_e9_capacity_state.py` | capacity x state-channel interaction | R1.5 / R2.4 |
+| `run_rules_capacity_sweep.py` | rule sweep over C ∈ {1..5} (no training) | R1.5 |
 | `run_rules_only.py` | the five dispatching rules (no training) | comparison columns |
 | `run_stats_and_plots.py` | aggregation and figures | — |
 | `run_all.py` | batch E0→E8 from a switch list | — |
@@ -288,6 +290,37 @@ show rather than what is expected.
 **Run:** `experiments/run_e8_layout.py`
 **Products:** `result/e8_mid_run*/eval_results.csv` (with a `layout` column)
 
+### E9 — capacity x state channels (cross-check of R1.5 and R2.4)
+
+E5 shows the per-robot channels add nothing significant at C=1 (p=0.317); E7
+shows SAPPO fails to exploit batching at C>1. The hypothesis: batching makes
+each robot's residual tour longer and more heterogeneous, so the per-resource
+information only becomes valuable at C>1. This experiment stacks the
+`plus_agent` channels onto C=2/3; the episode budget defaults to 3000 because
+C>1 converges more slowly.
+
+**Run:** `experiments/run_e9_capacity_state.py`
+**Products:** `eval_results.csv` under `result/e9_c2plus_run*/` and `e9_c3plus_run*/`
+**Then:** run `run_stats_and_plots.py` with `PATTERN = "e[579]_*"`
+
+### Rule capacity sweep (R1.5, minutes, no training)
+
+E7 revealed that batching pays off only when routing balances the queues
+(MQ-MinRQ). This sweeps all five rules over C ∈ {1..5} to trace the full
+batching-benefit curve.
+
+**Run:** `experiments/run_rules_capacity_sweep.py`
+**Products:** `result/rules_capacity_c{1..5}/eval_results.csv`
+**Then:** run `run_stats_and_plots.py` with `PATTERN = "rules_capacity_*"` and
+`SENSITIVITY_COLUMN = "robot_capacity"`
+
+### Table generation for the paper (after the experiments)
+
+Turns the CSVs under `result/` into the LaTeX fragments used by the revised
+manuscript and the response letter — no number is copied by hand. In the
+PyCharm terminal run `python -m paper_assets.make_tables`; products are
+`paper_assets/tables/tab_{ratio,capacity,gamma,state,picktime,layout,training_cost}.tex`.
+
 ### Dispatching rules only (no training required)
 
 The rules are deterministic, so one pass is enough; these results are the
@@ -368,11 +401,17 @@ want to keep into the paper repository.
    repository.** The paper's data-availability statement points here, so they
    must be archived under `baselines/rl/` before resubmission. Until then any
    new table can only carry SAPPO and the five dispatching rules.
-2. **The dispatching-rule numbers do not match Table 5 exactly.** With this
-   simulator MQ-ND on case C18 gives `F̄ = 1892.17` against the reported
-   1922.517 (−1.6 %). The original dispatching script is not in the repository,
-   so the tie-breaking details differ. Regenerating Table 5 with this
-   implementation would put every method on one simulator.
+2. **Numbers from this pipeline are not directly comparable to the submitted
+   tables.** Rules: MQ-ND on C18 gives `F̄ = 1892.17` against the reported
+   1922.517 (−1.6 %); the original dispatching script is not in the repository.
+   SAPPO: three independent retrainings of E0 give `F̄ = 1602.6 ± 62.9` against
+   the submitted 1379.89 for C18 — the original implementation never saved
+   checkpoints and evaluated periodically on the evaluation stream, so the
+   protocol behind the submitted number cannot be reconstructed, while this
+   pipeline selects checkpoints on validation streams and evaluates once, which
+   is systematically more conservative. Supplementary results are therefore
+   compared **within this pipeline only**, never number-for-number against the
+   submitted tables.
 3. **The `D̄` column of the paper is not a computation time.** The reported
    values equal makespan / #decision epochs — for C18/MQ-ND this simulator gives
    6.808 against the reported 6.827 (−0.3 %), while the actual computation time

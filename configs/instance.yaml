@@ -1,33 +1,17 @@
-# Order-arrival parameter table.
-#
-# Evaluation and validation streams are generated once, materialised as one CSV
-# per instance under data/instances/<tier>/ and never regenerated -- they, not a
-# random seed, are the reproduction baseline.  Training streams are re-sampled
-# every episode and never written to disk.
+# The 3 x 3 x 3 = 27 fixed evaluation cases and the order-stream parameters.
+# Each case Cxx gets its own materialised order stream (CSV); these files, not
+# a random seed, are the reproduction baseline.  Training streams are sampled
+# fresh every episode and never written to disk.
 instance:
   n_orders: 100
-  # The three published main streams carry exactly 5 items per order;
-  # newly generated streams follow the same rule by default.
   min_items_per_order: 5
   max_items_per_order: 5
-  mean_interarrival: 40.0     # 1/lambda used for training smoke tests
 
-  # The 27 cases C1..C27 of the manuscript are the cross product below.
-  # The order stream only depends on the arrival rate, so the "main" tier holds
-  # one stream per arrival rate; the resource setting comes from configs/env.yaml.
-  main_interarrivals: [20.0, 40.0, 60.0]
-  main_pickers: [1, 2, 3]
-  main_robots: [2, 4, 6]
-  n_main_streams: 3
-  n_val: 3
+  case_interarrivals: [20.0, 40.0, 60.0]   # 1/lambda, outer loop of the numbering
+  case_pickers: [1, 2, 3]                  # K, middle loop
+  case_robots: [2, 4, 6]                   # R, inner loop
+
+  n_val: 3                                 # validation streams (checkpoint selection)
   val_interarrival: 40.0
 
-  # Arrival rates deliberately outside the parameter table above.
-  large_interarrivals: [10.0, 100.0]
-  large_n_orders: 200
-
-  # "fixed"   -> reuse the materialised main-tier stream of mean_interarrival
-  #               (reproduces the submitted training setup)
-  # "sampled"  -> draw a fresh stream from the parameter table every episode
-  train_mode: fixed
   instances_dir: data/instances

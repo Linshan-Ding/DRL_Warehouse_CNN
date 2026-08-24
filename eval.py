@@ -1,22 +1,24 @@
-"""Evaluate SAPPO and the priority dispatching rules on the fixed instances.
+"""Evaluate trained global policies and dispatching rules on the fixed cases.
 
-    python eval.py --ckpt result/e0_run1/checkpoint_best.pt --tiers main \
-                   --methods SAPPO MQ-ND MQ-MinRQ MQ-MI MI-MinRQ MI-MI \
-                   --run-name e0_run1
+    python eval.py --methods SAPPO AG-DQN HSDDQN SOA+A2C DRLG \
+                   MQ-ND MQ-MinRQ MQ-MI MI-MinRQ MI-MI --out result/main
 
-Writes ``result/<run-name>/eval_results.csv`` with one row per
-(instance, method, run): the configuration that produced it, the mean order flow
-time, and *two* decision-time columns that must not be confused --
+Protocol (manuscript conventions):
 
-``decision_time_ms``       true wall-clock milliseconds per decision (this is
-                           what "average decision time" is defined as in the
-                           manuscript);
-``sim_time_per_decision``  simulated seconds per decision epoch, i.e.
-                           makespan / #epochs -- a measure of decision
-                           granularity, not of computational effort.
+* every RL method loads its ONE parameter file from ``models/`` and evaluates
+  each case with **3 stochastic-policy samples** (policy-gradient methods
+  sample from the policy distribution; value-based methods use epsilon-greedy
+  with the small evaluation epsilon of Table 6) -> mean +/- std of F-bar;
+* the dispatching rules are deterministic and evaluated once per case;
+* **D-bar is the true average decision time**: wall-clock milliseconds per
+  decision, measured around the action computation only.  The simulated
+  seconds between decision epochs are logged separately as
+  ``sim_time_per_decision`` and are a property of the system, not of the
+  algorithm.  Evaluation is single-process on purpose so the timing is clean.
 
-Only SAPPO and the five dispatching rules are available until the four RL
-baselines are archived under ``baselines/rl/`` (see its README).
+Scenario overrides turn the same command into every sensitivity study, e.g.
+``--set-capacity 2`` or ``--set-fleet 8 16`` -- the global policy is evaluated
+zero-shot, without retraining.
 """
 from __future__ import annotations
 
@@ -26,7 +28,7 @@ import os
 import time
 from typing import Dict, List, Optional, Sequence
 
-from agent.ppo import SAPPOAgent
+from agent.registry import ALGORITHMS, build, model_path
 from baselines.rules import PAPER_RULES, RulePolicy
 from configs.config import Config, add_config_arguments, case_id, config_from_args
 from data.dataset import read_index
@@ -35,7 +37,7 @@ from environment.env import WarehouseEnv
 from result.metrics import episode_metrics
 
 RESULT_FIELDS = (
-    "instance_id", "tier", "mean_interarrival", "case_id", "method", "run_id",
+    "case", "mean_interarrival", "case_id", "method", "sample_id",
     "n_aisles", "n_positions", "n_pickers", "n_robots", "robot_capacity",
     "state_channels", "layout", "pick_time", "gamma",
     "mean_flow_time", "makespan", "n_completed", "n_orders", "n_decisions",
@@ -43,100 +45,112 @@ RESULT_FIELDS = (
 )
 
 
-class RuleAgent:
-    """Adapter so a dispatching rule looks like an agent to this script."""
+class RuleMethod:
+    deterministic = True
 
     def __init__(self, name: str):
         self.name = name
         self.policy = RulePolicy(name)
 
-    def act_greedy(self, env, state) -> int:
+    def act(self, env, state) -> int:
         return self.policy.act(env)
 
 
-def solve_instance(cfg: Config, agent, stream_path: str) -> Dict[str, float]:
-    env = WarehouseEnv(cfg.env)
-    state = env.reset(load_orders(env.warehouse, stream_path))
+class ModelMethod:
+    deterministic = False
 
+    def __init__(self, cfg: Config, name: str, checkpoint: Optional[str] = None):
+        self.name = name
+        self.agent = build(name, cfg, cfg.torch_device)
+        path = checkpoint or model_path(cfg, name)
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"{path} not found -- train {name} first (experiments/run_1x_train_*.py)")
+        self.agent.load(path)
+
+    def act(self, env, state) -> int:
+        return self.agent.act_stochastic(env, state)
+
+
+def solve(cfg: Config, method, stream_path: str, env_overrides: dict) -> Dict[str, float]:
+    env = WarehouseEnv(cfg.scenario(**env_overrides))
+    state = env.reset(load_orders(env.warehouse, stream_path))
     decision_seconds = 0.0
     started = time.time()
-    for _ in range(cfg.env.max_steps):
+    for _ in range(env.cfg.max_steps):
         tick = time.perf_counter()
-        action = agent.act_greedy(env, state)
+        action = method.act(env, state)
         decision_seconds += time.perf_counter() - tick
         state, _, done, _ = env.step(action)
         if done:
             break
-
     return episode_metrics(env, decision_seconds, time.time() - started).as_row()
 
 
-def build_agents(cfg: Config, methods: Sequence[str], checkpoint: Optional[str]) -> List:
-    agents = []
-    for name in methods:
-        if name.upper() == "SAPPO":
-            if not checkpoint:
-                raise ValueError("--ckpt is required to evaluate SAPPO")
-            agent = SAPPOAgent(cfg.env, cfg.algo, cfg.torch_device)
-            agent.load(checkpoint)
-            agent.eval_mode()
-            agent.name = "SAPPO"
-            agents.append(agent)
-        elif name in PAPER_RULES or "-" in name:
-            agents.append(RuleAgent(name))
-        else:
-            raise ValueError(
-                f"unknown method {name!r}; available: SAPPO and the dispatching "
-                f"rules {', '.join(PAPER_RULES)}. RL baselines have to be added "
-                "under baselines/rl/ first.")
-    return agents
+def evaluate(cfg: Config, methods: Sequence[str], out_dir: str,
+             cases: Optional[Sequence[str]] = None, samples: int = 3,
+             env_overrides: Optional[dict] = None,
+             fleet_from_index: bool = True) -> str:
+    """Evaluate ``methods`` on the fixed cases; returns the CSV path.
 
-
-def evaluate(cfg: Config, methods: Sequence[str], tiers: Sequence[str],
-             checkpoint: Optional[str], run_id: int, out_path: str) -> str:
-    index = [row for row in read_index(cfg) if row["tier"] in tiers]
+    ``fleet_from_index=True`` (main protocol) takes (K, R) from each case's
+    index entry; overrides like capacity / pick time / layout stack on top.
+    ``False`` keeps the fleet from ``env_overrides`` for every stream (used by
+    the resource-scale study, which sweeps fleets over the lambda=40 streams).
+    """
+    env_overrides = dict(env_overrides or {})
+    index = read_index(cfg, tier="case")
+    if cases:
+        wanted = set(cases)
+        index = [row for row in index if row["case"] in wanted]
     if not index:
-        raise ValueError(f"no instances for tier(s) {list(tiers)} in the index")
+        raise ValueError("no cases selected")
 
-    agents = build_agents(cfg, methods, checkpoint)
-    rows: List[Dict[str, object]] = []
+    built: List = []
+    for name in methods:
+        built.append(ModelMethod(cfg, name) if name in ALGORITHMS else RuleMethod(name))
 
+    rows: List[Dict] = []
     for entry in index:
-        mean_interarrival = float(entry["mean_interarrival"])
-        for agent in agents:
-            metrics = solve_instance(cfg, agent, entry["path"])
-            rows.append({
-                "instance_id": entry["instance_id"],
-                "tier": entry["tier"],
-                "mean_interarrival": mean_interarrival,
-                "case_id": case_id(mean_interarrival, cfg.env.n_pickers,
-                                   cfg.env.n_robots, cfg.instance),
-                "method": agent.name,
-                "run_id": run_id,
-                "n_aisles": cfg.env.n_aisles,
-                "n_positions": cfg.env.n_positions,
-                "n_pickers": cfg.env.n_pickers,
-                "n_robots": cfg.env.n_robots,
-                "robot_capacity": cfg.env.robot_capacity,
-                "state_channels": cfg.env.state_channels,
-                "layout": cfg.env.layout,
-                "pick_time": cfg.env.pick_time,
-                "gamma": cfg.algo.gamma,
-                **{key: metrics[key] for key in (
-                    "mean_flow_time", "makespan", "n_completed", "n_orders",
-                    "n_decisions", "decision_time_ms", "sim_time_per_decision",
-                    "solve_wall_clock_s")},
-            })
-            print(f"  {entry['instance_id']:>8} {agent.name:<10} "
-                  f"F_bar={metrics['mean_flow_time']:10.3f}  "
-                  f"D_bar={metrics['decision_time_ms']:7.3f} ms  "
-                  f"sim/dec={metrics['sim_time_per_decision']:7.3f} s")
+        overrides = dict(env_overrides)
+        if fleet_from_index:
+            overrides.setdefault("n_pickers", int(entry["n_pickers"]))
+            overrides.setdefault("n_robots", int(entry["n_robots"]))
+        lam = float(entry["mean_interarrival"])
+        for method in built:
+            n_samples = 1 if method.deterministic else samples
+            for sample in range(1, n_samples + 1):
+                metrics = solve(cfg, method, entry["path"], overrides)
+                scenario = cfg.scenario(**overrides)
+                rows.append({
+                    "case": entry["case"], "mean_interarrival": lam,
+                    "case_id": case_id(lam, scenario.n_pickers, scenario.n_robots,
+                                       cfg.instance),
+                    "method": method.name, "sample_id": sample,
+                    "n_aisles": scenario.n_aisles, "n_positions": scenario.n_positions,
+                    "n_pickers": scenario.n_pickers, "n_robots": scenario.n_robots,
+                    "robot_capacity": scenario.robot_capacity,
+                    "state_channels": scenario.state_channels,
+                    "layout": scenario.layout, "pick_time": scenario.pick_time,
+                    "gamma": cfg.algo.gamma,
+                    **{key: metrics[key] for key in (
+                        "mean_flow_time", "makespan", "n_completed", "n_orders",
+                        "n_decisions", "decision_time_ms", "sim_time_per_decision",
+                        "solve_wall_clock_s")},
+                })
+            done_rows = [r for r in rows if r["case"] == entry["case"]
+                         and r["method"] == method.name]
+            flows = [r["mean_flow_time"] for r in done_rows]
+            times = [r["decision_time_ms"] for r in done_rows]
+            print(f"  {entry['case']} {method.name:<9} "
+                  f"F_bar={sum(flows)/len(flows):9.1f}  "
+                  f"D_bar={sum(times)/len(times):7.3f} ms  ({len(flows)} sample(s))")
 
-    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, "eval_results.csv")
     with open(out_path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(RESULT_FIELDS))
-        writer.writeheader()
-        writer.writerows(rows)
+        writer.writeheader(); writer.writerows(rows)
     print(f"\n{len(rows)} rows -> {out_path}")
     return out_path
 
@@ -144,19 +158,35 @@ def evaluate(cfg: Config, methods: Sequence[str], tiers: Sequence[str],
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     add_config_arguments(parser)
-    parser.add_argument("--ckpt", default=None, help="SAPPO checkpoint to evaluate")
-    parser.add_argument("--methods", nargs="*", default=list(PAPER_RULES),
-                        help="SAPPO and/or dispatching rule names")
-    parser.add_argument("--tiers", nargs="*", default=["main"],
-                        help="instance tiers: main, val, large")
-    parser.add_argument("--run-id", type=int, default=1,
-                        help="index of the independent run these results belong to")
-    parser.add_argument("--out", default=None, help="output CSV path")
+    parser.add_argument("--methods", nargs="+", required=True,
+                        help=f"any of {', '.join(ALGORITHMS)} and rules "
+                             f"{', '.join(PAPER_RULES)}")
+    parser.add_argument("--out", required=True, help="output directory")
+    parser.add_argument("--cases", nargs="*", default=None, help="subset, e.g. C18")
+    parser.add_argument("--samples", type=int, default=3)
+    parser.add_argument("--set-fleet", nargs=2, type=int, metavar=("K", "R"),
+                        default=None, help="override the fleet for every stream")
+    parser.add_argument("--set-capacity", type=int, default=None)
+    parser.add_argument("--set-pick-time", type=float, default=None)
+    parser.add_argument("--set-layout", default=None,
+                        choices=["two_cross_aisles", "three_cross_aisles"])
     args, extra = parser.parse_known_args()
-
     cfg = config_from_args(args, extra)
-    out = args.out or os.path.join(cfg.run.result_dir, cfg.run.run_name, "eval_results.csv")
-    evaluate(cfg, args.methods, args.tiers, args.ckpt, args.run_id, out)
+
+    overrides: Dict[str, object] = {}
+    fleet_from_index = True
+    if args.set_fleet:
+        overrides["n_pickers"], overrides["n_robots"] = args.set_fleet
+        fleet_from_index = False
+    if args.set_capacity is not None:
+        overrides["robot_capacity"] = args.set_capacity
+    if args.set_pick_time is not None:
+        overrides["pick_time"] = args.set_pick_time
+    if args.set_layout is not None:
+        overrides["layout"] = args.set_layout
+
+    evaluate(cfg, args.methods, args.out, args.cases, args.samples,
+             overrides, fleet_from_index)
 
 
 if __name__ == "__main__":

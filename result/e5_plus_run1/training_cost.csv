@@ -1,2 +1,0 @@
-run_name,n_aisles,n_positions,n_pickers,n_robots,robot_capacity,state_channels,gamma,n_actions,n_parameters,n_episodes,total_decisions,wall_clock_s,decisions_per_second,device
-e5_plus_run1,9,20,3,6,1,plus_agent,0.99,1626,13003227,2000,2176478,16995.311,128.063,cuda

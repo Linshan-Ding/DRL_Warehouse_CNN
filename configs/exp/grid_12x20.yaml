@@ -1,0 +1,4 @@
+# Warehouse-grid sensitivity (Table 11): 12 aisles x 20 positions.
+# Grid size changes the input geometry, so this trains from scratch; the
+# envelope is shrunk to the scenario resources to keep the head compact.
+env: {n_aisles: 12, n_positions: 20, k_max: 3, r_max: 6}

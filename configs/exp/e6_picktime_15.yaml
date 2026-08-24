@@ -1,8 +1,0 @@
-# E6 -- picking-time sensitivity (Reviewer #1, rack height).
-#
-# Multi-level racks are not modelled explicitly; assumption (A8) absorbs the
-# vertical retrieval motion into tau_pick. Raising tau_pick from 10 s to 15.0 s
-# therefore acts as a proxy for retrieval from higher rack levels and shows
-# whether the advantage of the learned policy survives longer service times.
-env:
-  pick_time: 15.0

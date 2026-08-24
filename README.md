@@ -1,369 +1,163 @@
-# SAPPO —— 人机协同订单拣选优化
+# SAPPO —— 人机协同订单拣选优化（全量重构版）
 
 > English version: [README_EN.md](README_EN.md)
 
 论文 *Spatially-Aware Deep Reinforcement Learning for Human-Robot Collaborative Order
 Picking Optimization in Smart Warehouse Systems*（CAIE，第二轮修订）的配套代码。
 
-本文件是**复现手册**，不是项目简介：从上到下照着做，就能跑出论文需要的全部实验数据。
-所有实验都在 **PyCharm 里右键 Run** 启动，不需要记参数、不需要拼命令行。
+本文件是**复现手册**：按第 3 节的顺序把 `experiments/` 下的脚本跑完，即可得到
+论文实验部分（Tables 5–12、Figs 8–14 的数据）与全部审稿意见回应所需的所有结果。
+所有脚本在 **PyCharm 里右键 Run** 启动，零参数，顶部配置区可改。
 
 ```
-configs/       参数文件，代码里没有任何硬编码数值
-data/          订单流生成与固定评测算例
-environment/   仓库模型、状态、动作掩码、离散事件仿真
-agent/         CNN 编码器、策略网络与价值网络、经验缓存、PPO 更新
-baselines/     组合排序规则（以及四个 RL 基线的接入位）
-experiments/   可直接右键运行的实验脚本 —— 唯一的启动入口
-result/        日志、指标、统计检验、绘图，以及各次运行的产出目录
-tools/         正确性闸门与原实现参考副本
-docs/          本仓库遵循的实验规格契约
+configs/       全部参数（YAML）；代码里没有硬编码数值
+data/          27 个固定算例（C01–C27）与验证流
+environment/   仓库模型、观测、动作掩码、离散事件仿真
+agent/         五个算法：SAPPO 与四个基线（共享编码器/动作头/掩码）
+parallel/      多进程 episode 采集器（共享内存参数同步）
+baselines/     五条组合调度规则
+experiments/   一键运行脚本 —— 唯一入口
+models/        每算法一个策略参数文件（训练产出，不进 git）
+result/        日志、评测 CSV、统计、图
+paper_assets/  从 CSV 生成论文 LaTeX 表格
+tools/         正确性闸门与产生初稿结果的原实现（参考副本）
 ```
 
 ---
 
-## 1. 问题与建模假设
+## 1. 问题与设计要点
 
-`N_w` 条巷道、每条 `N_l` 个拣货位的 parts-to-picker 仓库。`R` 台 AMR 承载订单并在拣货位
-排队，`K` 名拣货员走到拣货位后**串行服务整个队列**。订单在线到达（泊松过程）。
-优化目标是**平均订单流程时间 F**。
+`N_w×N_l` 网格仓库；`R` 台 AMR 承载订单并排队，`K` 名拣货员到点后**串行服务整个
+队列**；订单泊松到达；目标是**平均订单流程时间 F̄**。决策点事件驱动，每次只动一个
+资源；depot 处订单按 FIFO 交给空闲机器人（系统规则，至多载运容量 `C` 单），策略只
+决定拣货员派位与机器人路由。
 
-- **决策点是事件驱动的。** 仿真推进到"有空闲拣货员且某拣货位有机器人在等"或
-  "有载着订单的空闲机器人需要下一个目的地"时才停下来决策，每个决策点只动一个资源。
-- **订单分配是系统规则，不是策略动作。** 待分配订单在 depot 处按 FIFO 交给空闲机器人，
-  最多交到载运容量 `C`。策略只决定拣货员派往哪里、机器人去哪个拣货位。
-- **策略观测的是 `o_t = (s_t, M_t)`**：四通道张量（排队机器人数、拣货员在位、未拣件数、
-  未分配订单件数）**加上可行性掩码**。掩码由每台机器人/每个拣货员的个体状态构造，
-  是观测的一部分，不是事后过滤。
-- **奖励** `r_t = F_{t-1} - F_t`。无折扣时一个 episode 的累计奖励恰等于 `-F_final`，
-  `run_00_selfcheck.py` 会断言这一点。
-- **载运容量 `C`。** `C = 1` 就是已投稿版本的假设 (A1)；`C > 1` 允许一台 AMR 单次承接多个
-  订单并访问其必访点的并集。`C = 1` 与原实现逐事件完全一致。
-- **行走距离**沿巷道并经底部或顶部横通道绕行（Eq. 2）。`layout: three_cross_aisles`
-  会额外提供一条中部横通道。
-- **货架层高未建模**，竖直取件被吸收进 `tau_pick`；实验 E6 通过调 `tau_pick` 作为
-  "从更高层取货"的代理。
+**一个策略文件通吃所有场景（本次重构的核心）：**
 
-训练出来的策略**只对一个 `(N_w, N_l, K, R)` 配置有效**：actor 输出层维度是
-`|A| = K·N_w·N_l + R·(N_w·N_l + 1)`。每个配置都从零单独训练，checkpoint 存了 `|A|`，
-载入到不同配置会直接报错而不是给出错误结果。
+- 动作头按**资源包络**（K≤10、R≤20）定尺寸，|A| = (10+20)·180+20 = 5420；
+  场景里不存在的资源被掩码永久屏蔽。
+- 观测 = 论文的 4 个空间通道 + 5 个**配置广播平面**（K、R、C、τ_pick、布局的归一化
+  常值面），单一网络据此分辨场景。
+- 训练时**每个 episode 从参数表随机采样场景**（λ/K/R/容量/拣货时间/布局，权重见
+  `configs/train.yaml`）并新采订单流实例化环境 → 训练完每个算法**只保存一个**
+  策略文件，零样本服务全部 27 算例与各敏感性场景。
+- **仓库网格（N_w,N_l）例外**：改网格就改输入几何，须按网格从零重训
+  （`run_32`）——这正是对审稿人"迁移性"质疑的限定性回答。
 
----
+**两个指标（勿混）：** `F̄` = 平均订单流程时间；**`D̄` = 每次决策的真实墙钟毫秒**
+（只计动作计算，评测单进程串行以保证计时干净）。每个决策点之间的**仿真**间隔
+（makespan/决策数 ≈ 7 s）另存为 `sim_time_per_decision` 诊断列，不作为 D̄ 报告。
 
-## 2. 在 PyCharm 里配好环境
+**五个算法：** 列名沿用论文；四个对比方法采用**其文献方法对应的基础算法**适配本
+问题（原方法与本问题结构不兼容，正文脚注已说明）：
 
-1. **File → Open** 打开本仓库根目录（不要打开上一级）。
-2. **Settings → Project → Python Interpreter** 选一个 Python 3.11 解释器。
-3. 在项目树里双击打开 `requirements.txt`，PyCharm 顶部会弹出
-   **Install requirements**，点一下即可装齐依赖。
-   （偏好命令行的话，在 PyCharm 终端里执行 `pip install -r requirements.txt` 等价。）
-4. 工作目录**不用管**：`experiments/` 下的脚本第一行会 `import _bootstrap`，
-   它负责把仓库根加进 `sys.path` 并切换工作目录，所以从哪儿启动都对。
-   （如果你自定义了运行配置，把 Working directory 设成仓库根目录最省事。）
+| 列名 | 实现 | 关键设置（Table 6 对齐） |
+|---|---|---|
+| SAPPO | PPO（本文方法） | Table 4 全套，γ=0.99 |
+| AG-DQN | DQN | replay 100k、target 2000、ε 1→0.05 |
+| HSDDQN | Double DQN | 同上 + double-Q |
+| SOA+A2C | A2C | rollout 200 |
+| DRLG | 多 worker 短 rollout AC | rollout 20 |
 
-**可选：实时训练曲线。** 想在浏览器里实时看 loss 和流程时间曲线，先在 PyCharm 终端里
-起服务 `python -m visdom.server`（默认 `http://localhost:8097`）。不起也不影响训练，
-只是没有实时图；曲线数据始终会写进 `result/<run>/log.csv`。
-
-### 参考耗时
-
-在开发容器的 CPU 上实测（约 66 决策/秒，一个 episode 约 1100 个决策点）：
-
-| 阶段 | 耗时 |
-|---|---|
-| 生成固定算例（§4） | 几秒 |
-| 正确性自检（§5） | 约 1 分钟 |
-| 一个训练 episode | 约 16 秒（CPU） |
-| 一次 2000-episode 训练（§6） | 约 9–12 小时（CPU），GPU 上快很多 |
-| 一次评测（3 算例 × 6 方法） | 约 2 分钟 |
-
-正式排 run 矩阵之前，先从 `result/<run>/log.csv` 的 `sps` 和 `wall_clock_s` 两列
-读出你自己机器的吞吐。
+**评测协议：** 每个 RL 算法在每个算例上**随机策略采样评估 3 次**（策略梯度类按分布
+采样；值函数类 ε=0.05 贪婪）→ F̄ 均值±标准差；调度规则确定性单次。
 
 ---
 
-## 3. 怎么运行
+## 2. 环境配置（PyCharm）
 
-在项目树里找到 `experiments/` 下对应的脚本 → **右键 → Run '...'**。就这样。
+1. **File → Open** 打开仓库根目录；选 Python 3.11 解释器。
+2. 打开 `requirements.txt`，点编辑器顶部的 **Install requirements**
+   （或终端 `pip install -r requirements.txt`）。有 NVIDIA GPU 时装 CUDA 版
+   PyTorch 训练更快；评测 CPU 即可。
+3. 工作目录不用管：脚本第一行 `import _bootstrap` 会修好路径。
+4. **多进程注意**：训练脚本会起 `CPU核数−2` 个 worker 进程（配置区 `WORKERS` 可改）。
+   Windows/PyCharm 下正常；不要在训练同时跑第二个训练，除非把两边 WORKERS 各减半。
+5. 可选实时曲线：终端 `python -m visdom.server` 后再训练（不开不影响）。
 
-每个脚本都**不需要任何参数**，顶部有一段醒目的配置区，在 IDE 里改完再 Run 即可：
+**内存**：DQN 系 replay 默认 10 万条 float16 转移 ≈ 1.3 GB；不足时在
+`configs/train.yaml` 调小 `replay_size`。
 
-```python
-# ==================== 配置区（改完右键 Run） ====================
-RUNS     = 3      # 独立重复次数；论文级消融建议 >= 3
-EPISODES = None   # None = 用 configs/algo.yaml 的 2000；先填 20 快速验证链路
-METHODS  = ["SAPPO", "MQ-ND", "MQ-MinRQ", "MQ-MI", "MI-MinRQ", "MI-MI"]
-TIERS    = ["main"]
-# ==============================================================
+---
+
+## 3. 运行总控（哪些可并行、哪些必须串行）
+
+依赖 DAG（`run_all.py` 即按此串行；多机可把"可并行"的项分开跑）：
+
+```
+run_00 自检 ─┐
+run_01 算例 ─┴─(串行,最先,几分钟)
+      │
+      ▼
+run_10 SAPPO ─┬ run_11 AG-DQN ─┬ run_12 HSDDQN ─┬ run_13 SOA+A2C ─┬ run_14 DRLG
+  (五个训练互相独立 → 多台机器可并行；单机请串行 —— 每个都会吃满 CPU worker)
+      │
+      ▼ models/ 五个文件齐后
+run_20 主评测 ── run_21 规模 ── run_22 容量 ── run_23 拣选时间 ── run_24 布局
+  (五个评测互相独立，可与任何"训练"并行 —— 评测单进程、只占 1 核;
+   但 21–24 只需 models 存在，20 跑完与否不影响)
+      │
+run_30 γ消融 ── run_31 状态消融 ── run_32 网格   (三个都是额外训练:
+  互相独立、与 run_10..14 逻辑独立，但单机上与任何训练串行 —— 争 CPU)
+      │
+      ▼ 全部完成后
+run_40 统计+表格+图  (串行,最后,1 分钟)
 ```
 
-配置区里各项的含义：
+**单机推荐顺序** = `run_all.py` 的默认 STAGES（把不跑的注释掉即可）。
+**耗时标尺**：一次全局训练 = 15000 episodes；吞吐看 `result/train_*/log.csv` 的
+`sps` 列。参考：8 worker 约 1200–1600 决策/s → 单次训练约 3–6 小时；
+主评测约 1–2 小时；每个敏感性评测 20–40 分钟；γ/状态/网格是额外训练，同训练量级。
 
-| 变量 | 含义 |
-|---|---|
-| `RUNS` | 独立重复次数。本项目不固定随机种子，重复训练即为独立重复 |
-| `EPISODES` | 训练轮数。`None` 表示用 `configs/algo.yaml` 里的 2000；填 20 可以几分钟验证整条链路 |
-| `METHODS` | 参与评测的方法：`"SAPPO"` 与五条组合规则 |
-| `TIERS` | 评测算例档位：`main`（论文的 27 个算例）、`val`、`large` |
-| `CONFIGS` | 多配置实验（E1/E2/E4/E6/E7）里"跑哪几个配置"的列表 |
-| `PATTERN` | 统计脚本里"汇总哪些运行"，例如 `"e4_*"` 只看折扣因子消融 |
-
-更深层的参数（仓库尺寸、资源数量、PPO 超参……）都在 `configs/` 下的 YAML 里，
-实验专属的差异写在 `configs/exp/*.yaml`，脚本按名字引用，一般不需要改。
-
-### 脚本总表
-
-| 脚本 | 作用 | 回应的意见 |
-|---|---|---|
-| `run_00_selfcheck.py` | 三道正确性闸门 | — |
-| `run_01_prepare_data.py` | 生成各档固定算例 | — |
-| `run_smoke.py` | 极小预算跑通全链路 | — |
-| `run_e0_baseline.py` | **基线复现 C18（其余实验的门槛）** | — |
-| `run_e1_ratio.py` | 人机配比 (1,1)/(3,1)/(4,2) | R1.2 |
-| `run_e2_scale.py` | 更大规模 (8,16)/(10,20) | R1.6 |
-| `run_e3_training_cost.py` | 训练成本汇总（不训练） | R2.1 |
-| `run_e4_gamma.py` | gamma ∈ {0.95, 0.99, 1.0} 消融 | R2.3 |
-| `run_e5_state_channels.py` | 状态通道消融 | R2.4 |
-| `run_e6_picktime.py` | tau_pick ∈ {15, 20} 敏感性 | R1.4 |
-| `run_e7_capacity.py` | 载运容量 C ∈ {2, 3} | R1.5 |
-| `run_e8_layout.py` | 中部横通道布局变体 | R1.3 |
-| `run_e9_capacity_state.py` | 容量 x 状态通道联合实验 | R1.5 / R2.4 |
-| `run_rules_capacity_sweep.py` | 规则的容量扫描 C ∈ {1..5}（不训练） | R1.5 |
-| `run_rules_only.py` | 五条规则基线（不训练） | 各表对比列 |
-| `run_stats_and_plots.py` | 统计聚合与出图 | — |
-| `run_all.py` | 按开关列表批跑 E0→E8 | — |
-
-**批量跑：** `run_all.py` 顶部是一个开关列表，把不想跑的注释掉再 Run。每项都注了预计耗时，
-全开会跑好几天。
+**先演练再投产**：任何训练脚本把配置区 `EPISODES` 设为 20（或 `run_all.py` 里统一
+设），几分钟跑通全链路后再改回 `None` 正式训练。
 
 ---
 
-## 4. 数据准备
+## 4. 脚本清单与产物对照表
 
-**运行：** 右键运行 `experiments/run_01_prepare_data.py`（只需要跑一次）
+| 脚本（右键 Run） | 做什么 | 产出 | 服务于 |
+|---|---|---|---|
+| `run_00_selfcheck.py` | 三道正确性闸门 | 控制台 PASS | 可信度基线 |
+| `run_01_make_instances.py` | 生成 C01–C27 + 验证流 | `data/instances/**` | 全部评测 |
+| `run_10_train_sappo.py` | SAPPO 全局策略 | `models/sappo.pt`、`result/train_sappo/` | 全部表图 |
+| `run_11..14_train_*.py` | 四个基线全局策略 | `models/{ag_dqn,hsddqn,soa_a2c,drlg}.pt` | Table 7/10 |
+| `run_20_eval_main.py` | 27 算例 × 10 方法 | `result/main/eval_results.csv` | **Table 5、7、8、9**；Fig 9/10/11 |
+| `run_21_eval_scale.py` | 零样本评 5 档机队 | `result/scale/K*_R*/` | **Table 10**（R1.6+R2.1） |
+| `run_22_eval_capacity.py` | 零样本评 C∈{2,3} | `result/capacity/c*/` | 容量表（R1.5） |
+| `run_23_eval_picktime.py` | 零样本评 τ∈{15,20} | `result/picktime/tau*/` | τ 表（R1.4） |
+| `run_24_eval_layout.py` | 零样本评三横通道 | `result/layout/three/` | 布局表（R1.3） |
+| `run_30_gamma_ablation.py` | 训练+评 γ∈{0.95,1.0} | `models/sappo_g*.pt`、`result/gamma/` | γ 表（R2.3） |
+| `run_31_state_ablation.py` | 训练+评 +个体通道 | `models/sappo_plus.pt`、`result/state_plus/` | 状态表（R2.4） |
+| `run_32_warehouse_grids.py` | 12×20 与 9×30 重训+评 | `models/*_12x20.pt` 等、`result/grid/` | **Tables 11、12** |
+| `run_40_stats_tables_plots.py` | 检验+LaTeX 表+草图 | `result/stats_summary.csv`、`paper_assets/tables/*.tex`、`result/figures/` | Table 8/9 与全部表图 |
+| `run_all.py` | 按 STAGES 串行批跑 | 上述全部 | — |
 
-**产出：** `data/instances/{main,val,large}/*.csv` 与 `data/instances/index.csv`
+训练曲线（Fig. 8 风格）：各 `result/train_*/log.csv` 的 `curve_C06/C13/C15/C24` 列
+（训练中周期性在代表算例上贪婪评测，仅作曲线、不参与选点；选点用验证流）。
 
-已存在的文件**永远不会被覆盖**——这些算例文件（而不是随机种子）才是复现基准，
-本项目任何地方都不固定随机种子。其中 `main` 档的三条订单流就是产生已投稿结果的那三条，
-随仓库一起提交，所以新克隆下来会直接复用。
-
----
-
-## 5. 正确性自检
-
-**运行：** 右键运行 `experiments/run_00_selfcheck.py`
-
-三道闸门，全部 PASS 才值得信任后面的实验：
-
-1. **奖励恒等式** —— `Σ r_t = -F_final`，说明智能体优化的确实是论文的目标函数。
-2. **与原实现逐事件等价** —— 用同一条确定性规则同时驱动本环境和
-   `tools/reference/env_I_submitted.py`（产生已投稿结果的原实现，原样保留），
-   在每个决策点比对时钟、所选动作、奖励、状态张量和最终 F。
-3. **载运容量退化** —— `C = 1` 与原来的"一次一单"模型完全一致，`C = 2` 确实改变调度。
-
-想换别的算例或规则检查，就改脚本顶部的 `STREAM` 与 `RULE`（例如换成
-`data/instances/main/lam20.csv` 与 `MI-MI`）。
-
----
-
-## 6. E0 基线复现（先做这个）
-
-论文的基准算例 C18：`1/lambda = 40`、`K = 3`、`R = 6`。
-
-**运行：** 右键运行 `experiments/run_e0_baseline.py`（`RUNS` 默认 3）
-
-**产出：** `result/e0_run*/{log.csv, checkpoint_best.pt, checkpoint_last.pt,
-training_cost.csv, eval_results.csv, config_snapshot.yaml}`
-
-**通过标准。** SAPPO 在 `lam40` 上报出的 F 应落在已投稿数值的多次运行波动范围内
-（论文 Table 5 的 C18：`F = 1379.890`）。跑满 3 次就能看到这个范围。
-E0 复现不了的话，先查清原因，别急着跑后面的实验。
-
-> 想先确认链路通不通，把脚本里的 `EPISODES` 改成 20，几分钟就能跑完一轮。
+审稿意见 → 数据的完整映射：R1.1 纯写作；R1.2 由 `tab_ratio`（main+scale 重组）；
+R1.3→`tab_layout`；R1.4→`tab_picktime`；R1.5→`tab_capacity`；R1.6+R2.1→`tab_scale`
++`tab_training_cost`（单策略零样本跨规模 = 迁移性质疑的直接回答）；R2.2 纯写作；
+R2.3→`tab_gamma`；R2.4→`tab_state`。
 
 ---
 
-## 7. 补充实验
+## 5. 正确性自检（`run_00`）
 
-消融实验请把 `RUNS` 设为**至少 3**——本项目不固定随机种子，重复训练即为独立重复。
-每个脚本会自己按 `<名字>_run<次数>` 建运行目录，不用手工命名。
-
-### E1 人机配比场景（R1.2）
-
-论文已有的 27 个算例其实已覆盖 1:2、1:4、1:6、1:1（K=2,R=2）、2:4、2:6、3:2、3:4、3:6，
-只是没按"配比"组织过。这里补上缺的三个极端档 (K,R) = (1,1)、(3,1)、(4,2)。
-
-**运行：** 右键运行 `experiments/run_e1_ratio.py`
-**产出：** `result/e1_k1r1_run*/`、`e1_k3r1_run*/`、`e1_k4r2_run*/` 下的
-`eval_results.csv`（含 `n_pickers`、`n_robots` 两列，可直接按配比重排成表）
-
-### E2 更大规模（R1.6）
-
-上一轮修订已经做到 K=6 / R=12（论文 Table 10），这里再加两档。
-
-**运行：** 右键运行 `experiments/run_e2_scale.py`
-**产出：** `result/e2_k8r16_run*/`、`e2_k10r20_run*/` 下的 `eval_results.csv`
-与 `training_cost.csv`
-
-### E3 训练成本随规模变化（R2.1）
-
-不需要单独训练：每次训练都会写一份 `training_cost.csv`，这一步只是汇总。
-先跑完 E0/E1/E2 再来。
-
-**运行：** 右键运行 `experiments/run_e3_training_cost.py`
-**产出：** `result/training_cost_summary.csv`
-
-表里的 `n_actions` 一列同时也是"每个配置都是从零单独训练、没有跨规模权重迁移"的证据。
-
-### E4 折扣因子消融（R2.3）
-
-奖励 `r_t = F_{t-1} - F_t` 只有在 `gamma = 1` 时才严格 telescoping 成 `-F_final`；
-`gamma < 1` 时按 Abel 分部求和多出一个 `O(1-gamma)` 的路径项，方向一致但不恒等。
-这个实验测的就是这个差别在实践中有多大。
-
-**运行：** 右键运行 `experiments/run_e4_gamma.py`（三个 gamma 各跑 `RUNS` 次，默认 3）
-**产出：** `result/e4_gamma0.95_run*/`、`e4_gamma0.99_run*/`、`e4_gamma1.00_run*/`
-下的 `eval_results.csv`（含 `gamma` 一列）
-**随后：** 右键运行 `run_stats_and_plots.py`，把 `PATTERN` 设为 `"e4_*"`、
-`SENSITIVITY_COLUMN` 设为 `"gamma"`
-
-### E5 状态通道消融（R2.4）
-
-`plus_agent` 额外给出两个通道：待路径决策机器人的剩余必访点分布、空闲资源的位置分布，
-也就是目前只有掩码看得到、状态张量里没有的那部分信息。对照组直接用 E0 的结果。
-
-**运行：** 右键运行 `experiments/run_e5_state_channels.py`（`RUNS` 默认 3）
-**产出：** `result/e5_plus_run*/eval_results.csv`（含 `state_channels` 一列）
-**随后：** 右键运行 `run_stats_and_plots.py`，`PATTERN` 设为 `"e[05]_*"` 一起看两组
-
-### E6 拣选时间敏感性（R1.4，多层货架代理）
-
-**运行：** 右键运行 `experiments/run_e6_picktime.py`
-**产出：** `result/e6_tau15_run*/`、`e6_tau20_run*/` 下的 `eval_results.csv`
-**随后：** 右键运行 `run_stats_and_plots.py`，`SENSITIVITY_COLUMN` 设为 `"pick_time"`
-
-### E7 机器人单次载运能力（R1.5）
-
-**运行：** 右键运行 `experiments/run_e7_capacity.py`
-**产出：** `result/e7_c2_run*/`、`e7_c3_run*/` 下的 `eval_results.csv`
-**随后：** 右键运行 `run_stats_and_plots.py`，`SENSITIVITY_COLUMN` 设为 `"robot_capacity"`
-
-`C` 变大会拉长单台机器人的路径，若不配套路径优化，F **未必单调改善**——
-参考数据：规则 MQ-ND、lam40、K=3/R=6 下 C=1 得 1892.17，C=2 得 1948.98。
-结论方向不要预设，跑出来是什么就报什么。
-
-### E8 中部横通道布局变体（R1.3）
-
-**运行：** 右键运行 `experiments/run_e8_layout.py`
-**产出：** `result/e8_mid_run*/eval_results.csv`（含 `layout` 一列）
-
-### E9 容量 x 状态通道联合实验（R1.5 / R2.4 的交叉验证）
-
-E5 表明 C=1 下补 per-robot 通道不显著（p=0.317）；E7 表明 C>1 下 SAPPO 没吃到批量收益。
-假说：批量让每台机器人的剩余任务更长更异质，个体信息在 C>1 下才变得重要。
-本实验把 plus_agent 通道叠加到 C=2/3 上验证；训练轮数默认 3000（C>1 收敛更慢）。
-
-**运行：** 右键运行 `experiments/run_e9_capacity_state.py`
-**产出：** `result/e9_c2plus_run*/`、`e9_c3plus_run*/` 下的 `eval_results.csv`
-**随后：** 右键运行 `run_stats_and_plots.py`，`PATTERN` 设为 `"e[579]_*"` 三组一起看
-
-### 规则容量扫描（R1.5，几分钟，不训练）
-
-E7 揭示批量收益只有配队列均衡型路由（MQ-MinRQ）才兑现。本脚本把五条规则在
-C ∈ {1..5} 上全部扫一遍，画出完整的"批量收益曲线"。
-
-**运行：** 右键运行 `experiments/run_rules_capacity_sweep.py`
-**产出：** `result/rules_capacity_c{1..5}/eval_results.csv`
-**随后：** 右键运行 `run_stats_and_plots.py`，`PATTERN` 设为 `"rules_capacity_*"`、
-`SENSITIVITY_COLUMN` 设为 `"robot_capacity"`
-
-### 只跑规则基线（不需要训练，几分钟）
-
-规则是确定性的，跑一次就够；这份结果是所有新表的对比列来源。
-
-**运行：** 右键运行 `experiments/run_rules_only.py`
-**产出：** `result/rules_main/eval_results.csv`
-
-### 论文表格生成（实验跑完后）
-
-把 `result/` 里的 CSV 变成修订稿与回复信用的 LaTeX 表格片段——数字不手抄。
-在 PyCharm 终端执行 `python -m paper_assets.make_tables`，产出
-`paper_assets/tables/tab_{ratio,capacity,gamma,state,picktime,layout,training_cost}.tex`。
-
-### 冒烟测试（几分钟确认环境没装错）
-
-**运行：** 右键运行 `experiments/run_smoke.py`
-**产出：** `result/smoke_run1/` 下的全套文件
-
-训练轮数太少，学不到任何东西——这一步只证明链路通。
+1. **奖励恒等式** `Σ r_t = −F̄_final`：优化的确实是论文目标。
+2. **与原实现逐事件等价**：同一条确定性规则驱动新环境与
+   `tools/reference/env_I_submitted.py`（产生初稿结果的原实现，原样保留），逐决策点
+   比对时钟/动作/奖励/**前 4 个空间通道**/最终 F̄（配置平面是新增的，不参与物理比对）。
+3. **容量退化**：C=1 与初稿"一次一单"模型完全一致；C=2 确实改变调度。
 
 ---
 
-## 8. 统计聚合与绘图
+## 6. 已知说明
 
-**运行：** 右键运行 `experiments/run_stats_and_plots.py`
-**产出：** `result/stats_summary.csv` 与 `result/figures/*.pdf|.png`
-
-脚本顶部有三个常改的开关：
-
-| 变量 | 作用 |
-|---|---|
-| `PATTERN` | 汇总哪些运行。`"*"` 全部；`"e4_*"` 只看折扣因子消融 |
-| `SENSITIVITY_COLUMN` | 敏感性曲线的横轴列，如 `"gamma"`、`"robot_capacity"`、`"pick_time"` |
-| `DRAW_STATE_FIGURE` | 是否顺便画论文 Fig. 5 的状态表示示意图 |
-
-统计口径：按方法给出 F 在算例上和在多次独立运行上的均值 ± 标准差，再把每个方法与
-SAPPO 做**配对**检验（配对 t 检验、Wilcoxon 符号秩检验、Cohen's d）——之所以配对，
-是因为所有方法解的是同一批固定算例。
-
-### 两个"决策时间"列不要混淆
-
-| 列名 | 含义 | 本仓库实测量级 |
-|---|---|---|
-| `decision_time_ms` | 每次决策的**计算**墙钟时间 | 规则约 0.03 ms，SAPPO 约 3.4 ms（CPU） |
-| `sim_time_per_decision` | 每个决策点之间的**仿真**秒数（makespan / 决策点数） | 约 7 s |
-
-`sim_time_per_decision` 描述的是决策粒度，不是算得快不快，**不能当作计算时间报告**。
-两种方法的决策计算都远快于相邻决策点之间约 7 秒的间隔，因此都能实时运行。
-
----
-
-## 9. 产物对照表
-
-| 文件 | 由哪个脚本产出 | 服务于 |
-|---|---|---|
-| `data/instances/**/*.csv`、`index.csv` | `run_01_prepare_data.py` | 固定评测基准 |
-| `result/e0_run*/log.csv` | `run_e0_baseline.py` | 收敛曲线；E0 门槛 |
-| `result/e0_run*/eval_results.csv` | `run_e0_baseline.py` | Table 5 / Table 7 的复现 |
-| `result/*/training_cost.csv`、`result/training_cost_summary.csv` | 各训练脚本 + `run_e3_training_cost.py` | 训练成本随规模变化（R2.1） |
-| `result/e1_*/eval_results.csv` | `run_e1_ratio.py` | 人机配比表（R1.2） |
-| `result/e2_*/eval_results.csv` | `run_e2_scale.py` | 更大规模（R1.6） |
-| `result/e4_*/eval_results.csv` | `run_e4_gamma.py` | 折扣因子消融（R2.3） |
-| `result/e5_*/eval_results.csv` | `run_e5_state_channels.py` | 状态充分性消融（R2.4） |
-| `result/e6_*/eval_results.csv` | `run_e6_picktime.py` | 拣选时间敏感性（R1.4） |
-| `result/e7_*/eval_results.csv` | `run_e7_capacity.py` | 载运容量敏感性（R1.5） |
-| `result/e8_*/eval_results.csv` | `run_e8_layout.py` | 布局变体（R1.3） |
-| `result/rules_main/eval_results.csv` | `run_rules_only.py` | 各表的规则对比列 |
-| `result/stats_summary.csv` | `run_stats_and_plots.py` | 显著性检验 |
-| `result/figures/*.pdf` | `run_stats_and_plots.py` | 论文用图草稿 |
-
-运行目录不进 git（见 `.gitignore`），要留档的 CSV 自行复制到论文仓库。
-
----
-
-## 10. 已知缺口
-
-1. **四个 RL 基线（AG-DQN、HSDDQN、SOA+A2C、DRLG）不在本仓库里。** 论文的
-   Data availability 指向这里，重投前必须把它们归档到 `baselines/rl/`。在此之前，
-   新表只能有 SAPPO 与五条组合规则两类列。
-2. **本流水线的复现值与初稿表格不直接可比。** 规则侧：MQ-ND 在 C18 得
-   `F = 1892.17`，论文报 1922.517（差 −1.6%），原始规则脚本不在仓库里，平局打破细节
-   无从对齐。SAPPO 侧：E0 三次独立重训得 `F = 1602.6 ± 62.9`，论文 C18 报 1379.89——
-   原实现从不保存权重、且在评测流上周期性评测，其数字的产生协议已不可复原；本流水线
-   采用"验证流选 checkpoint、测试流只评一次"的严格协议，系统性偏保守。因此**补充实验
-   的结论只在本流水线内部自洽比较**，不与初稿表格逐数字对照。
-3. **论文的 `D` 列不是计算时间。** 报告值等于 makespan / 决策点数——本仿真器下
-   C18/MQ-ND 得 6.808，论文报 6.827（差 −0.3%），而真实计算时间约 0.03 ms。见 §8。
-
-`docs/experiment-spec.md` 是这些实验遵循的契约，改动"测什么、写什么"之前先读它。
+1. **新旧数字不可直接对照。** 本版是全量重训（单一全局策略、新算例、新评测协议、
+   D̄ 换为真实计算时间），所有表格整体替换，不与初稿逐数字比较。
+2. **规则更快是预期的。** D̄ 实测规则约 0.02 ms、SAPPO 约 2–3 ms；两者都远小于相邻
+   决策点之间约 7 s 的仿真间隔，实时性均无压力——论文据此改写实时性论证。
+3. **models/ 不进 git**（单文件 50–85 MB）。要归档就发 Release 或网盘，README 注明。
+4. `docs/experiment-spec.md` 是实验契约（v2.0），改"测什么/存什么"之前先读它。

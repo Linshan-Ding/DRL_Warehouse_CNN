@@ -1,2 +1,0 @@
-run_name,n_aisles,n_positions,n_pickers,n_robots,robot_capacity,state_channels,gamma,n_actions,n_parameters,n_episodes,total_decisions,wall_clock_s,decisions_per_second,device
-e1_k4r2_run1,9,20,4,2,1,base,0.99,1082,11886267,2000,2183997,16321.295,133.813,cuda

@@ -150,14 +150,15 @@ class RulePolicy:
 
 
 def to_action_index(env, choice: Choice) -> int:
+    """Flat envelope-action index for the current simulator."""
     n_points = len(_points(env))
-    n_pickers = len(env.pickers)
-    n_robots = len(env.robots)
+    k_max = env.cfg.k_max
+    r_max = env.cfg.r_max
     if choice.kind == "picker":
         return picker_action_index(choice.actor, choice.target, n_points)
     if choice.target == DEPOT_TARGET:
-        return robot_depot_index(choice.actor, n_points, n_pickers, n_robots)
-    return robot_action_index(choice.actor, choice.target, n_points, n_pickers)
+        return robot_depot_index(choice.actor, n_points, k_max, r_max)
+    return robot_action_index(choice.actor, choice.target, n_points, k_max)
 
 
 def build(names: Sequence[str] | None = None) -> List[RulePolicy]:

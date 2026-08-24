@@ -1,0 +1,2 @@
+# Warehouse-grid sensitivity (Table 12): 9 aisles x 30 positions.
+env: {n_aisles: 9, n_positions: 30, k_max: 3, r_max: 6}

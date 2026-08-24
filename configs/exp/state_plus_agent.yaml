@@ -1,0 +1,3 @@
+# State-sufficiency ablation (R2.4): expose the per-robot information the mask
+# uses as two extra channels (residual required locations, idle-resource map).
+env: {state_channels: plus_agent}

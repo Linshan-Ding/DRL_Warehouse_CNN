@@ -1,4 +1,0 @@
-instance_id,tier,mean_interarrival,case_id,method,run_id,n_aisles,n_positions,n_pickers,n_robots,robot_capacity,state_channels,layout,pick_time,gamma,mean_flow_time,makespan,n_completed,n_orders,n_decisions,decision_time_ms,sim_time_per_decision,solve_wall_clock_s
-lam20,main,20.0,9,SAPPO,3,9,20,3,6,1,base,two_cross_aisles,10.0,0.99,2773.8666666666663,6985.666666666664,100,100,1088,0.8783675551539465,6.420649509803919,1.2639851570129395
-lam40,main,40.0,18,SAPPO,3,9,20,3,6,1,base,two_cross_aisles,10.0,0.99,1570.75,6848.666666666662,100,100,1085,0.8707228580206495,6.312135176651302,1.1708204746246338
-lam60,main,60.0,27,SAPPO,3,9,20,3,6,1,base,two_cross_aisles,10.0,0.99,615.5533333333345,7443.000000000004,100,100,1090,0.8611066965386271,6.8284403669724805,1.0965702533721924

@@ -1,0 +1,2 @@
+# Discount-factor ablation arm (R2.3): gamma = 1.0 -- the strictly telescoping case.
+algo: {gamma: 1.0}

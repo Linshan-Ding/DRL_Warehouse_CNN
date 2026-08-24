@@ -1,55 +1,50 @@
-"""State representation, action space and feasibility mask (manuscript Section 4.2-4.3).
+"""Observation, envelope action space and feasibility mask.
 
-Two things are worth stating explicitly, because Reviewer #2 asked about them:
+The observation given to every learning algorithm is ``o_t = (s_t, M_t)``:
 
-* the state tensor ``s_t`` aggregates everything **per picking point** -- it
-  carries no robot or picker identity;
-* the feasibility mask ``M_t`` is built from per-resource information (which
-  robot still needs which locations, which picker is idle).
+* ``s_t`` -- 4 spatial channels over the picking-point grid (Section 4.2 of the
+  manuscript) plus 5 constant *configuration planes* that let one network serve
+  every scenario: K/k_max, R/r_max, C/c_max, tau_pick/tau_ref and the layout
+  flag.  The optional ``plus_agent`` variant appends 2 per-robot channels
+  carrying exactly the information the mask uses (state-sufficiency ablation).
+* ``M_t`` -- the feasibility mask, built from per-resource information.  It is
+  part of the observation, not a post-processing step.
 
-The policy therefore acts on the pair ``o_t = (s_t, M_t)``; the mask is part of
-the observation, not a post-processing step.  The optional ``plus_agent``
-channel set makes the per-resource information visible to the network as well
-and exists so that this design choice can be tested (experiment E5).
+The flat action index is laid out for the resource *envelope* (k_max, r_max),
+so a single policy head serves every (K, R) scenario; pickers ``k >= K`` and
+robots ``r >= R`` simply never appear in the feasible set.
 """
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import List
 
 import numpy as np
 
-# --------------------------------------------------------------------------- #
-# flat action index layout (identical to the submitted implementation)
-#   [0, K*P)                 picker k -> picking point j
-#   [K*P, (K+R)*P)           robot r  -> picking point j
-#   [(K+R)*P, (K+R)*P + R)   robot r  -> depot
-# --------------------------------------------------------------------------- #
 DEPOT_TARGET = -1
 
 
+# --------------------------------------------------------------------------- #
+# envelope action layout:
+#   [0, k_max*P)                      picker k -> point j
+#   [k_max*P, (k_max+r_max)*P)        robot r  -> point j
+#   [(k_max+r_max)*P, ... + r_max)    robot r  -> depot
+# --------------------------------------------------------------------------- #
 def picker_action_index(picker_idx: int, point_idx: int, n_points: int) -> int:
     return picker_idx * n_points + point_idx
 
+def robot_action_index(robot_idx: int, point_idx: int, n_points: int, k_max: int) -> int:
+    return k_max * n_points + robot_idx * n_points + point_idx
 
-def robot_action_index(robot_idx: int, point_idx: int, n_points: int, n_pickers: int) -> int:
-    return n_pickers * n_points + robot_idx * n_points + point_idx
+def robot_depot_index(robot_idx: int, n_points: int, k_max: int, r_max: int) -> int:
+    return (k_max + r_max) * n_points + robot_idx
 
+def n_actions(n_points: int, k_max: int, r_max: int) -> int:
+    return (k_max + r_max) * n_points + r_max
 
-def robot_depot_index(robot_idx: int, n_points: int, n_pickers: int, n_robots: int) -> int:
-    return (n_pickers + n_robots) * n_points + robot_idx
-
-
-def n_actions(n_points: int, n_pickers: int, n_robots: int) -> int:
-    return (n_pickers + n_robots) * n_points + n_robots
-
-
-def decode_action(index: int, n_points: int, n_pickers: int, n_robots: int):
-    """Return ``("picker", picker_idx, point_idx)`` or ``("robot", robot_idx, target)``.
-
-    ``target`` is a picking-point index, or ``DEPOT_TARGET`` for a return trip.
-    """
-    picker_block = n_pickers * n_points
-    robot_block = picker_block + n_robots * n_points
+def decode_action(index: int, n_points: int, k_max: int, r_max: int):
+    """-> ("picker"|"robot", actor_idx, point_idx | DEPOT_TARGET)."""
+    picker_block = k_max * n_points
+    robot_block = picker_block + r_max * n_points
     if index < picker_block:
         return "picker", index // n_points, index % n_points
     if index < robot_block:
@@ -59,24 +54,20 @@ def decode_action(index: int, n_points: int, n_pickers: int, n_robots: int):
 
 
 # --------------------------------------------------------------------------- #
-# state tensor
-# --------------------------------------------------------------------------- #
 def build_state(env) -> np.ndarray:
-    """Multi-channel state tensor, shape ``(n_channels, N_w, N_l)``.
+    """State tensor, shape (n_channels, N_w, N_l).
 
-    Base channels (Section 4.2):
-      0  M_r  robots queueing at the picking point
-      1  M_k  picker present (0/1)
-      2  M_u  unpicked items of arrived, uncompleted orders
-      3  M_q  items of orders that arrived but have no robot yet
-
-    Additional channels for ``state_channels: plus_agent`` (experiment E5):
-      4  residual demand of the robots that are currently awaiting a routing
-         decision -- the per-robot information the mask uses
-      5  positions of the idle resources awaiting a decision
+    Channels 0-3 (manuscript Section 4.2):
+      M_r robots queueing | M_k picker present | M_u unpicked items |
+      M_q items of arrived-but-unassigned orders
+    Channels 4-8 -- configuration planes (constant over the grid):
+      K/k_max | R/r_max | C/c_max | tau_pick/tau_ref | layout flag
+    Channels 9-10 (``plus_agent`` only):
+      residual demand of robots awaiting routing | idle-resource positions
     """
     warehouse = env.warehouse
     height, width = warehouse.N_w, warehouse.N_l
+    cfg = env.cfg
 
     m_queue = np.zeros((height, width), dtype=np.float32)
     m_picker = np.zeros((height, width), dtype=np.float32)
@@ -87,20 +78,28 @@ def build_state(env) -> np.ndarray:
         row, col = warehouse.grid_position(point.point_id)
         m_queue[row, col] = len(point.robot_queue)
         m_picker[row, col] = 0.0 if point.picker is None else 1.0
-
     for order in env.orders_uncompleted:
         for item in order.unpicked_items:
             row, col = warehouse.grid_position(item.pick_point_id)
             m_unpicked[row, col] += 1.0
-
     for order in env.orders_unassigned:
         for item in order.unpicked_items:
             row, col = warehouse.grid_position(item.pick_point_id)
             m_unassigned[row, col] += 1.0
 
-    channels = [m_queue, m_picker, m_unpicked, m_unassigned]
+    def plane(value: float) -> np.ndarray:
+        return np.full((height, width), value, dtype=np.float32)
 
-    if env.cfg.state_channels != "base":
+    channels = [
+        m_queue, m_picker, m_unpicked, m_unassigned,
+        plane(cfg.n_pickers / cfg.k_max),
+        plane(cfg.n_robots / cfg.r_max),
+        plane(cfg.robot_capacity / cfg.capacity_max),
+        plane(cfg.pick_time / cfg.pick_time_ref),
+        plane(1.0 if cfg.layout == "three_cross_aisles" else 0.0),
+    ]
+
+    if cfg.state_channels != "base":
         m_residual = np.zeros((height, width), dtype=np.float32)
         m_resource = np.zeros((height, width), dtype=np.float32)
         for robot in env.robots:
@@ -126,28 +125,19 @@ def build_state(env) -> np.ndarray:
 
 
 # --------------------------------------------------------------------------- #
-# feasibility mask
-# --------------------------------------------------------------------------- #
 def legal_action_indices(env) -> List[int]:
-    """Indices of the feasible actions at the current decision epoch.
+    """Feasible envelope-action indices at the current decision epoch.
 
-    Feasibility rules (Section 4.3):
-
-    * picker action ``(k, j)``: picker ``k`` is idle, point ``j`` has at least
-      one waiting robot and no picker assigned;
-    * robot action ``(r, j)``: robot ``r`` is idle, carries at least one order
-      and still requires service at ``j``;
-    * robot action ``(r, depot)``: robot ``r`` has collected every required item
-      and stands at a picking point.
+    Feasibility rules are those of Section 4.3; resources beyond the scenario's
+    (K, R) never appear, which is how the envelope head stays valid for every
+    scenario.
     """
     warehouse = env.warehouse
+    cfg = env.cfg
     n_points = warehouse.n_pick_points
-    n_pickers = len(env.pickers)
-    n_robots = len(env.robots)
     index_of = warehouse.pick_point_index
 
     legal: set[int] = set()
-
     idle_points = [index_of[p.point_id] for p in warehouse.pick_points_list if p.is_idle]
     if idle_points:
         for picker_idx, picker in enumerate(env.pickers):
@@ -162,17 +152,7 @@ def legal_action_indices(env) -> List[int]:
         if robot.item_pick_order:
             for item in robot.item_pick_order:
                 point_idx = index_of[item.pick_point_id]
-                legal.add(robot_action_index(robot_idx, point_idx, n_points, n_pickers))
+                legal.add(robot_action_index(robot_idx, point_idx, n_points, cfg.k_max))
         elif robot.pick_point is not None:
-            legal.add(robot_depot_index(robot_idx, n_points, n_pickers, n_robots))
-
+            legal.add(robot_depot_index(robot_idx, n_points, cfg.k_max, cfg.r_max))
     return sorted(legal)
-
-
-def action_description(env, index: int) -> str:
-    kind, actor, target = decode_action(index, env.warehouse.n_pick_points,
-                                        len(env.pickers), len(env.robots))
-    if target == DEPOT_TARGET:
-        return f"robot {actor} -> depot"
-    point = env.warehouse.pick_points_list[target]
-    return f"{kind} {actor} -> point {point.point_id}"

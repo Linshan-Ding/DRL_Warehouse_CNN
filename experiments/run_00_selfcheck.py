@@ -1,52 +1,42 @@
-"""正确性自检 —— 跑任何实验之前先跑这个。
+"""正确性自检 —— 跑任何实验之前先跑这个（串行，最先）。
 
 三道闸门（全部必须 PASS）:
+1. 奖励恒等式    无折扣累计奖励恰等于 -F_final，智能体优化的确实是论文目标。
+2. 与原实现等价  用同一条确定性规则驱动重构环境与 tools/reference/ 里
+                 产生已投稿结果的原实现，逐决策点比对时钟/动作/奖励/前 4 个
+                 空间通道/最终 F（新观测追加的配置平面不参与物理比对）。
+3. 容量退化      C=1 与"一次一单"模型完全一致，C=2 确实改变调度。
 
-1. 奖励恒等式    一个 episode 的无折扣累计奖励恰等于 -F_final，
-                 说明智能体优化的确实是论文的目标函数而不是某个代理量。
-2. 与原实现等价  用同一条确定性规则同时驱动重构后的环境和
-                 tools/reference/env_I_submitted.py（产生已投稿结果的原实现，
-                 原样保留），逐个决策点比对时钟、所选动作、奖励、状态张量和最终 F。
-3. 容量退化      C=1 与原来的"一次一单"模型完全一致，C=2 确实改变调度。
-
-产出: 不写文件，结果直接打印在控制台，三行都是 PASS 才算通过。
-耗时: 约 1 分钟。
+产出: 控制台三行 PASS。耗时: 约 1 分钟。
 """
-import _bootstrap  # noqa: F401  必须最先导入
+import _bootstrap  # noqa: F401
 
 from configs.config import load_config
+from data.dataset import make_instances
 from data.generator import load_stream_csv
 from tools.selfcheck import (check_capacity_degeneracy, check_legacy_equivalence,
                              check_reward_identity)
 from _runner import banner
 
 # ==================== 配置区（改完右键 Run） ====================
-STREAM = "data/instances/main/lam40.csv"   # 用哪条订单流做自检
-RULE = "MQ-ND"                             # 驱动自检的确定性规则
-OVERLAYS = []                              # 想检查别的配置就填 configs/exp/xxx.yaml
+STREAM = "data/instances/cases/C18.csv"
+RULE = "MQ-ND"
 # ==============================================================
 
 
-def main(stream=STREAM, rule=RULE, overlays=OVERLAYS):
-    cfg = load_config(overlays)
+def main(stream=STREAM, rule=RULE):
+    cfg = load_config()
+    make_instances(cfg)
     records = load_stream_csv(stream)
-    banner("正确性自检",
-           f"订单流: {stream}\n"
-           f"配置: N_w={cfg.env.n_aisles} N_l={cfg.env.n_positions} "
-           f"K={cfg.env.n_pickers} R={cfg.env.n_robots} C={cfg.env.robot_capacity} "
-           f"规则={rule}")
-
-    results = {
-        "奖励恒等式": check_reward_identity(cfg, records, rule),
-        "与原实现逐事件等价": check_legacy_equivalence(cfg, records, rule),
-        "载运容量退化": check_capacity_degeneracy(cfg, records, rule),
-    }
-
+    banner("正确性自检", f"订单流: {stream} | 规则: {rule}")
+    results = {"奖励恒等式": check_reward_identity(cfg, records, rule),
+               "与原实现逐事件等价": check_legacy_equivalence(cfg, records, rule),
+               "载运容量退化": check_capacity_degeneracy(cfg, records, rule)}
     banner("自检结果")
     for item, ok in results.items():
         print(f"  {item:<24} {'PASS' if ok else 'FAIL'}")
-    failed = [item for item, ok in results.items() if not ok]
-    print("\n全部通过，可以开始跑实验" if not failed else f"\n未通过: {', '.join(failed)}")
+    failed = [k for k, ok in results.items() if not ok]
+    print("\n全部通过" if not failed else f"\n未通过: {failed}")
     return not failed
 
 

@@ -1,0 +1,2 @@
+run_name,n_aisles,n_positions,n_pickers,n_robots,robot_capacity,state_channels,gamma,n_actions,n_parameters,n_episodes,total_decisions,wall_clock_s,decisions_per_second,device
+e4_gamma0.95_run3,9,20,3,6,1,base,0.95,1626,13000923,2000,2177171,10975.165,198.373,cuda

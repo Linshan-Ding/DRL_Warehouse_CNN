@@ -16,6 +16,7 @@ Section 3 it should not appear in the paper.
 
 | Version | Change | Reason | Affects |
 |---|---|---|---|
+| 1.1 | Added E9 (capacity x state channels), the rule capacity sweep, and `paper_assets/make_tables.py`; recorded the E0 reproduction outcome. | E7 showed SAPPO does not exploit batching while E5 showed the per-robot channels are redundant at C=1 — E9 tests the interaction; E0 gave 1602.6 ± 62.9 against the submitted 1379.89, so supplementary results are compared within this pipeline only. | R1.5 / R2.4 responses; every table of the revision |
 | 1.0 | Initial specification, reverse-engineered from the submitted `manuscript.tex` and the second-round reviewer comments. | The repository had no specification; the supplementary experiments requested by the reviewers need one. | all downstream stages |
 
 ---
@@ -156,7 +157,9 @@ columns, or is explicitly marked as a text-only revision.
 | R2.2 | hyperparameter selection | — (text) | `configs/algo.yaml` provenance | moderated claim in Section 5.4 |
 | R2.3 | discount factor vs telescoping | **E4** `γ` ∈ {0.95, 0.99, 1.0}, ≥3 runs each | `eval_results.csv` → `gamma` | corrected Eq. (14) discussion |
 | R2.4 | state sufficiency | **E5** `base` vs `plus_agent` channels, ≥3 runs each | `eval_results.csv` → `state_channels` | `o_t = (s_t, M_t)` formalisation + ablation |
-| — | reproduction gate | **E0** case C18 | `eval_results.csv` | credibility of everything above |
+| R1.5 + R2.4 | does per-robot state matter under batching? | **E9** `plus_agent` x `C` ∈ {2, 3} | `eval_results.csv` → `robot_capacity, state_channels` | strengthens both responses |
+| R1.5 | system-level batching-benefit curve | **rule sweep** `C` ∈ {1..5}, no training | `eval_results.csv` → `robot_capacity` | capacity discussion |
+| — | reproduction gate | **E0** case C18 | `eval_results.csv` | credibility of everything above; outcome: 1602.6 ± 62.9 vs submitted 1379.89 — see Section 6 |
 
 ---
 
@@ -187,4 +190,12 @@ Deviations from the code-generation guideline, each with its reason.
    this implementation would put every method on one simulator — which is
    exactly what the fairness claim in Section 5.4 needs.
 3. **Fix the decision-time column.** The values reported as `D̄` equal
-   makespan / #decision epochs, not computation time; see Section 2.4.
+   makespan / #decision epochs, not computation time; see Section 2.4. Measured
+   on the author's GPU machine: SAPPO ≈ 1.7 ms per decision, a rule ≈ 0.02 ms,
+   against ≈ 6.5 simulated seconds between consecutive epochs.
+4. **Present supplementary results within this pipeline only.** E0 gives
+   `F̄ = 1602.6 ± 62.9` for C18 against the submitted 1379.89 (2.8 sd away), and
+   the reproduced ranking is softer (SAPPO first on `lam40`, second on `lam20`,
+   fourth on `lam60` with a 6 % gap to the best rule). The submitted numbers
+   remain the record of the original implementation; new tables anchor on this
+   pipeline's own C18 row and state the protocol difference in a footnote.

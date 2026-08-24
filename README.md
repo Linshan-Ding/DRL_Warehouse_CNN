@@ -127,6 +127,8 @@ TIERS    = ["main"]
 | `run_e6_picktime.py` | tau_pick ∈ {15, 20} 敏感性 | R1.4 |
 | `run_e7_capacity.py` | 载运容量 C ∈ {2, 3} | R1.5 |
 | `run_e8_layout.py` | 中部横通道布局变体 | R1.3 |
+| `run_e9_capacity_state.py` | 容量 x 状态通道联合实验 | R1.5 / R2.4 |
+| `run_rules_capacity_sweep.py` | 规则的容量扫描 C ∈ {1..5}（不训练） | R1.5 |
 | `run_rules_only.py` | 五条规则基线（不训练） | 各表对比列 |
 | `run_stats_and_plots.py` | 统计聚合与出图 | — |
 | `run_all.py` | 按开关列表批跑 E0→E8 | — |
@@ -256,12 +258,38 @@ E0 复现不了的话，先查清原因，别急着跑后面的实验。
 **运行：** 右键运行 `experiments/run_e8_layout.py`
 **产出：** `result/e8_mid_run*/eval_results.csv`（含 `layout` 一列）
 
+### E9 容量 x 状态通道联合实验（R1.5 / R2.4 的交叉验证）
+
+E5 表明 C=1 下补 per-robot 通道不显著（p=0.317）；E7 表明 C>1 下 SAPPO 没吃到批量收益。
+假说：批量让每台机器人的剩余任务更长更异质，个体信息在 C>1 下才变得重要。
+本实验把 plus_agent 通道叠加到 C=2/3 上验证；训练轮数默认 3000（C>1 收敛更慢）。
+
+**运行：** 右键运行 `experiments/run_e9_capacity_state.py`
+**产出：** `result/e9_c2plus_run*/`、`e9_c3plus_run*/` 下的 `eval_results.csv`
+**随后：** 右键运行 `run_stats_and_plots.py`，`PATTERN` 设为 `"e[579]_*"` 三组一起看
+
+### 规则容量扫描（R1.5，几分钟，不训练）
+
+E7 揭示批量收益只有配队列均衡型路由（MQ-MinRQ）才兑现。本脚本把五条规则在
+C ∈ {1..5} 上全部扫一遍，画出完整的"批量收益曲线"。
+
+**运行：** 右键运行 `experiments/run_rules_capacity_sweep.py`
+**产出：** `result/rules_capacity_c{1..5}/eval_results.csv`
+**随后：** 右键运行 `run_stats_and_plots.py`，`PATTERN` 设为 `"rules_capacity_*"`、
+`SENSITIVITY_COLUMN` 设为 `"robot_capacity"`
+
 ### 只跑规则基线（不需要训练，几分钟）
 
 规则是确定性的，跑一次就够；这份结果是所有新表的对比列来源。
 
 **运行：** 右键运行 `experiments/run_rules_only.py`
 **产出：** `result/rules_main/eval_results.csv`
+
+### 论文表格生成（实验跑完后）
+
+把 `result/` 里的 CSV 变成修订稿与回复信用的 LaTeX 表格片段——数字不手抄。
+在 PyCharm 终端执行 `python -m paper_assets.make_tables`，产出
+`paper_assets/tables/tab_{ratio,capacity,gamma,state,picktime,layout,training_cost}.tex`。
 
 ### 冒烟测试（几分钟确认环境没装错）
 
@@ -329,9 +357,12 @@ SAPPO 做**配对**检验（配对 t 检验、Wilcoxon 符号秩检验、Cohen's
 1. **四个 RL 基线（AG-DQN、HSDDQN、SOA+A2C、DRLG）不在本仓库里。** 论文的
    Data availability 指向这里，重投前必须把它们归档到 `baselines/rl/`。在此之前，
    新表只能有 SAPPO 与五条组合规则两类列。
-2. **规则基线的数字与 Table 5 对不上。** 本仿真器下 MQ-ND 在 C18 得 `F = 1892.17`，
-   论文报 1922.517（差 −1.6%）。原始的规则脚本不在仓库里，平局打破的细节无从对齐。
-   用本实现重跑 Table 5 可以让所有方法跑在同一个仿真器上。
+2. **本流水线的复现值与初稿表格不直接可比。** 规则侧：MQ-ND 在 C18 得
+   `F = 1892.17`，论文报 1922.517（差 −1.6%），原始规则脚本不在仓库里，平局打破细节
+   无从对齐。SAPPO 侧：E0 三次独立重训得 `F = 1602.6 ± 62.9`，论文 C18 报 1379.89——
+   原实现从不保存权重、且在评测流上周期性评测，其数字的产生协议已不可复原；本流水线
+   采用"验证流选 checkpoint、测试流只评一次"的严格协议，系统性偏保守。因此**补充实验
+   的结论只在本流水线内部自洽比较**，不与初稿表格逐数字对照。
 3. **论文的 `D` 列不是计算时间。** 报告值等于 makespan / 决策点数——本仿真器下
    C18/MQ-ND 得 6.808，论文报 6.827（差 −0.3%），而真实计算时间约 0.03 ms。见 §8。
 

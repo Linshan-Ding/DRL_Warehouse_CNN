@@ -116,7 +116,7 @@ class TrainCfg:
     perturb_layout_prob: float = 0.34
 
     # checkpoint selection and curve logging
-    eval_interval: int = 50           # rounds between validation evaluations
+    eval_interval: int = 10           # rounds between periodic evaluations
     curve_cases: List[str] = field(default_factory=lambda: ["C06", "C13", "C15", "C24"])
 
 

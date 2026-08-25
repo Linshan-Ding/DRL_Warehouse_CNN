@@ -90,7 +90,22 @@ rules run once.
 4. **Multiprocessing note:** training spawns `cpu_count − 2` workers (edit
    `WORKERS` in the script's configuration block).  Do not run two trainings
    at once on one machine unless you halve `WORKERS` on both.
-5. Optional live curves: `python -m visdom.server` before training.
+5. **Live training monitor (visdom, on by default):** start
+   `python -m visdom.server`, open `http://localhost:8097` and pick the
+   `sappo_<run_name>` panel (one per training run).  Windows:
+   - **Representative cases** -- the greedy F-bar curves of the four fixed
+     cases **C06/C13/C15/C24** merged into one multi-line window; this is the
+     direct view of training progress and the data behind the Fig. 8 style
+     figure (also persisted as the `curve_C*` columns of `log.csv`);
+   - `eval_flow_mean` -- greedy F-bar on the validation streams (checkpoint
+     selection uses this, independent of the four cases above);
+   - `mean_flow_time` -- the F-bar of the training episodes themselves
+     (sampled policy, randomised scenarios; noisy by nature);
+   - loss / entropy / KL / sps / GPU-memory diagnostics in their own windows.
+   The cadence is `eval_interval` in `configs/train.yaml` (default 10 rounds
+   = one curve point per ~80 episodes with 8 workers; each evaluation costs
+   30-60 s while the workers idle).  Without a visdom server training runs
+   unchanged and the curves still land in `log.csv`.
 
 **Memory:** the DQN replay stores 100k float16 transitions ≈ 1.3 GB; reduce
 `replay_size` in `configs/train.yaml` if needed.

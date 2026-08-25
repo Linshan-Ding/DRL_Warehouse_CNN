@@ -123,6 +123,20 @@ class RunLogger:
         for key, value in row.items():
             if key in ("step", "wall_clock_s") or not isinstance(value, (int, float)):
                 continue
+            if key.startswith("curve_"):
+                # The representative-case curves share one multi-line window so
+                # convergence across cases can be compared at a glance.
+                window_key = "representative_cases"
+                update = "append" if window_key in self._windows else None
+                window = self.vis.line(
+                    X=np.array([step]), Y=np.array([float(value)]),
+                    win=self._windows.get(window_key), update=update,
+                    name=key.replace("curve_", ""),
+                    opts=dict(title="Representative cases (greedy F-bar)",
+                              xlabel="episode", ylabel="mean flow time",
+                              showlegend=True))
+                self._windows[window_key] = window
+                continue
             update = "append" if key in self._windows else None
             window = self.vis.line(X=np.array([step]), Y=np.array([float(value)]),
                                    win=self._windows.get(key), update=update,

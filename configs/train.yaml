@@ -14,7 +14,12 @@ train:
   perturb_pick_times: [15.0, 20.0]
   perturb_layout_prob: 0.34   # probability that a perturbed episode uses the middle cross-aisle
 
-  eval_interval: 50           # rounds between validation evaluations (checkpoint selection)
+  # Rounds between the periodic evaluations (validation streams for checkpoint
+  # selection + the representative-case curves).  Each evaluation runs 7 greedy
+  # episodes in the main process (~30-60 s) while the workers idle, so smaller
+  # values buy curve density at a small throughput cost.  10 rounds with
+  # 8 workers = one curve point every ~80 episodes.
+  eval_interval: 10
   curve_cases: [C06, C13, C15, C24]   # logged for the Fig. 8 style training curves
 
 # SAPPO (PPO) hyperparameters -- manuscript Table 4, verbatim.

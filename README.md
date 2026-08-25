@@ -73,7 +73,18 @@ tools/         正确性闸门与产生初稿结果的原实现（参考副本�
 3. 工作目录不用管：脚本第一行 `import _bootstrap` 会修好路径。
 4. **多进程注意**：训练脚本会起 `CPU核数−2` 个 worker 进程（配置区 `WORKERS` 可改）。
    Windows/PyCharm 下正常；不要在训练同时跑第二个训练，除非把两边 WORKERS 各减半。
-5. 可选实时曲线：终端 `python -m visdom.server` 后再训练（不开不影响）。
+5. **实时训练监控（visdom，默认开启）**：先在终端起 `python -m visdom.server`，
+   浏览器开 `http://localhost:8097`，面板下拉选 `sappo_<run_name>`（每次训练一个面板）。
+   窗口内容：
+   - **Representative cases**：四条固定代表算例 **C06/C13/C15/C24** 的贪婪 F̄ 曲线
+     合并在一个多线窗口——这就是"训练效果"的直接监控，也是论文 Fig. 8 的数据来源
+     （同步落盘在 `log.csv` 的 `curve_C*` 列）；
+   - `eval_flow_mean`：验证流上的贪婪 F̄（checkpoint 按它选，独立于上面四个算例）；
+   - `mean_flow_time`：训练 episode（采样策略、随机场景）的 F̄，噪声大属正常；
+   - loss/熵/KL/sps/显存等诊断曲线各自成窗。
+   评估频率由 `configs/train.yaml` 的 `eval_interval` 控制（默认 10 轮 ≈ 8 worker 下
+   每 80 episodes 一个点；每次评估约 30–60 s、期间 worker 空闲，调大省时间调小更密）。
+   不起 visdom 服务训练照常，曲线数据始终写入 `log.csv`。
 
 **内存**：DQN 系 replay 默认 10 万条 float16 转移 ≈ 1.3 GB；不足时在
 `configs/train.yaml` 调小 `replay_size`。

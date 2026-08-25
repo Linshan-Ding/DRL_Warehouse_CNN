@@ -71,10 +71,11 @@ class ActorCriticAgent(LearningAgent):
     def act_collect(self, env, state: np.ndarray, exploration: float):
         legal = env.legal_actions()
         tensor = self._tensor(state, self.device)
-        logits = self._masked(self.policy_net(tensor), legal)
-        dist = torch.distributions.Categorical(logits=logits)
-        action = dist.sample()
-        return (int(action.item()), float(dist.log_prob(action).item()),
+        sub = self._legal_subvector(self.policy_net(tensor), legal,
+                                    f"{self.name}.act_collect")
+        dist = torch.distributions.Categorical(logits=sub)
+        pick = dist.sample()
+        return (int(legal[int(pick.item())]), float(dist.log_prob(pick).item()),
                 float(self.value_net(tensor).item()))
 
     # -- learner side ------------------------------------------------------ #
@@ -138,15 +139,17 @@ class ActorCriticAgent(LearningAgent):
     # -- evaluation -------------------------------------------------------- #
     @torch.no_grad()
     def act_greedy(self, env, state: np.ndarray) -> int:
-        logits = self._masked(self.policy_net(self._tensor(state, self.device)),
-                              env.legal_actions())
-        return int(torch.argmax(logits, dim=1).item())
+        legal = env.legal_actions()
+        sub = self._legal_subvector(self.policy_net(self._tensor(state, self.device)),
+                                    legal, f"{self.name}.act_greedy")
+        return int(legal[int(torch.argmax(sub).item())])
 
     @torch.no_grad()
     def act_stochastic(self, env, state: np.ndarray) -> int:
-        logits = self._masked(self.policy_net(self._tensor(state, self.device)),
-                              env.legal_actions())
-        return int(torch.distributions.Categorical(logits=logits).sample().item())
+        legal = env.legal_actions()
+        sub = self._legal_subvector(self.policy_net(self._tensor(state, self.device)),
+                                    legal, f"{self.name}.act_stochastic")
+        return int(legal[int(torch.distributions.Categorical(logits=sub).sample().item())])
 
     # -- persistence ------------------------------------------------------- #
     def save(self, path: str) -> None:

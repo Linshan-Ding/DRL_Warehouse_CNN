@@ -103,6 +103,28 @@ class LearningAgent(abc.ABC):
         invalid[:, list(legal)] = False
         return logits.masked_fill(invalid, MASK_FILL)
 
+    @staticmethod
+    def _legal_subvector(output: torch.Tensor, legal: Sequence[int],
+                         context: str) -> torch.Tensor:
+        """(1, |A|) network output -> (n_legal,) sub-vector, with a finiteness guard.
+
+        Selecting inside the legal sub-vector (instead of masking with -1e9 and
+        selecting over the full head) makes an illegal action impossible even
+        when the network output degenerates: a NaN or a diverged output used to
+        let argmax/sampling land on a masked index, and the simulator would
+        then be silently corrupted (dangling picker/point bookkeeping) until it
+        stalled much later.  Sub-vector softmax equals the masked full softmax
+        restricted to the legal set, so log-probs are unchanged.
+        """
+        idx = torch.as_tensor(list(legal), dtype=torch.long, device=output.device)
+        sub = output[0, idx]
+        if not torch.isfinite(sub).all():
+            raise RuntimeError(
+                f"{context}: non-finite network output over the {len(idx)} legal "
+                "actions -- training has diverged (NaN/Inf); inspect the loss and "
+                "KL curves. Failing fast instead of applying an illegal action.")
+        return sub
+
 
 def check_compatibility(payload: dict, env_cfg) -> None:
     meta = payload.get("meta", {})

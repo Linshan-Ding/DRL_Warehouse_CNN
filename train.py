@@ -145,6 +145,8 @@ def train(cfg: Config, algo_name: str) -> str:
             tick = time.perf_counter()
             episodes = collector.collect(agent.exploration(), scenarios)
             collect_s = time.perf_counter() - tick
+            if not episodes:      # every episode of the round failed (and was logged)
+                continue
 
             tick = time.perf_counter()
             stats = agent.learn(episodes)

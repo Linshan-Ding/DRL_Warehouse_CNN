@@ -20,7 +20,8 @@ def build(name: str, cfg: Config, device: str):
     from agent.sappo import SAPPOAgent
 
     if name == "SAPPO":
-        return SAPPOAgent(cfg.env, cfg.algo, device)
+        return SAPPOAgent(cfg.env, cfg.algo, device,
+                          total_episodes=cfg.train.n_episodes)
     if name == "AG-DQN":
         return DQNAgent(cfg.env, cfg.algo, cfg.baselines, device, double=False, name=name)
     if name == "HSDDQN":

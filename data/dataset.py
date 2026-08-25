@@ -59,21 +59,29 @@ def make_instances(cfg: Config) -> str:
                      "n_orders": len({row["order_id"] for row in records}),
                      "n_rows": len(records), "path": path})
 
+    # Validation streams: one per arrival rate of the case grid.  During
+    # training each stream is evaluated on the fleet mini-grid
+    # (cfg.train.val_fleets), so checkpoint selection spans load regimes
+    # instead of only the centre scenario.  (Legacy val00..02 files may remain
+    # on disk from the R1 protocol; they are simply no longer indexed.)
     val_dir = os.path.join(cfg.instance.instances_dir, "val")
     os.makedirs(val_dir, exist_ok=True)
-    for i in range(cfg.instance.n_val):
-        path = os.path.join(val_dir, f"val{i:02d}.csv")
-        if not os.path.exists(path):
-            save_stream_csv(sample_order_records(warehouse, cfg.instance,
-                                                 cfg.instance.n_orders,
-                                                 cfg.instance.val_interarrival, rng), path)
-            print(f"[val] generated {path}")
-        records = load_stream_csv(path)
-        rows.append({"case": f"val{i:02d}", "tier": "val",
-                     "mean_interarrival": cfg.instance.val_interarrival,
-                     "n_pickers": cfg.env.n_pickers, "n_robots": cfg.env.n_robots,
-                     "n_orders": len({row["order_id"] for row in records}),
-                     "n_rows": len(records), "path": path})
+    for lam in cfg.instance.case_interarrivals:
+        for i in range(cfg.instance.val_streams_per_lambda):
+            suffix = f"_{i:02d}" if i else ""
+            name = f"val_l{lam:g}{suffix}"
+            path = os.path.join(val_dir, f"{name}.csv")
+            if not os.path.exists(path):
+                save_stream_csv(sample_order_records(warehouse, cfg.instance,
+                                                     cfg.instance.n_orders,
+                                                     float(lam), rng), path)
+                print(f"[val] generated {path}  (1/lambda={lam:g})")
+            records = load_stream_csv(path)
+            rows.append({"case": name, "tier": "val",
+                         "mean_interarrival": float(lam),
+                         "n_pickers": cfg.env.n_pickers, "n_robots": cfg.env.n_robots,
+                         "n_orders": len({row["order_id"] for row in records}),
+                         "n_rows": len(records), "path": path})
 
     index_path = os.path.join(cfg.instance.instances_dir, "index.csv")
     with open(index_path, "w", newline="", encoding="utf-8") as fh:

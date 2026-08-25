@@ -66,7 +66,7 @@ footnote states this):
 
 | Column | Implementation | Key settings (Table 6) |
 |---|---|---|
-| SAPPO | PPO (the paper's method) | full Table 4, γ = 0.99 |
+| SAPPO | PPO (the paper's method) | full revised Table 4, γ = 0.99 |
 | AG-DQN | DQN | replay 100k, target 2000, ε 1→0.05 |
 | HSDDQN | Double DQN | as above + double-Q target |
 | SOA+A2C | A2C | rollout 200 |
@@ -76,6 +76,19 @@ footnote states this):
 stochastic-policy samples** (policy-gradient methods sample the policy;
 value-based methods use ε = 0.05 greedy) → mean ± std of F̄; the deterministic
 rules run once.
+
+**SAPPO global-policy stabilisers (R2 revision, reflected in the revised
+Table 4):** mixed-scenario returns differ by an order of magnitude, so
+(a) the critic trains on **normalised returns** (running statistics travel to
+the workers with the parameters); (b) advantages are **standardised per
+episode** (`algo.advantage_norm`), giving light- and heavy-load scenarios an
+equal voice in the gradient; (c) up to 4 PPO epochs with an **early stop once
+the approximate KL exceeds `kl_target = 0.02`**; (d) learning rates and the
+entropy coefficient **decay linearly** over the episode budget (→10% /
+→0.002); (e) minibatch 256; (f) orthogonal initialisation (policy head gain
+0.01 → near-uniform initial policy).  Checkpoints are selected on a
+**validation mini-grid**: 3 λ streams × 3 fleets (1,2)/(2,4)/(3,6) = 9 greedy
+episodes, so selection spans load regimes instead of only the centre one.
 
 ---
 
@@ -97,15 +110,19 @@ rules run once.
      cases **C06/C13/C15/C24** merged into one multi-line window; this is the
      direct view of training progress and the data behind the Fig. 8 style
      figure (also persisted as the `curve_C*` columns of `log.csv`);
-   - `eval_flow_mean` -- greedy F-bar on the validation streams (checkpoint
-     selection uses this, independent of the four cases above);
+   - `eval_flow_mean` -- mean greedy F-bar over the validation mini-grid
+     (3 λ streams × 3 fleets = 9 episodes; checkpoint selection uses this,
+     independent of the four cases above);
    - `mean_flow_time` -- the F-bar of the training episodes themselves
      (sampled policy, randomised scenarios; noisy by nature);
+   - SAPPO additionally logs `ret_mean`/`ret_std` (critic normalisation
+     statistics), `ppo_epochs_used` (KL early stop), and the current
+     `actor_lr`/`entropy_coef` (decay schedules);
    - loss / entropy / KL / sps / GPU-memory diagnostics in their own windows.
    The cadence is `eval_interval` in `configs/train.yaml` (default 10 rounds
-   = one curve point per ~80 episodes with 8 workers; each evaluation costs
-   30-60 s while the workers idle).  Without a visdom server training runs
-   unchanged and the curves still land in `log.csv`.
+   = one curve point per ~80 episodes with 8 workers; each evaluation runs
+   13 greedy episodes, ~1-2 min, while the workers idle).  Without a visdom
+   server training runs unchanged and the curves still land in `log.csv`.
 
 **Memory:** the DQN replay stores 100k float16 transitions ≈ 1.3 GB; reduce
 `replay_size` in `configs/train.yaml` if needed.

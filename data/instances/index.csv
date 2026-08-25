@@ -26,6 +26,6 @@ C24,case,60.0,2,6,100,500,data/instances/cases/C24.csv
 C25,case,60.0,3,2,100,500,data/instances/cases/C25.csv
 C26,case,60.0,3,4,100,500,data/instances/cases/C26.csv
 C27,case,60.0,3,6,100,500,data/instances/cases/C27.csv
-val00,val,40.0,3,6,100,500,data/instances/val/val00.csv
-val01,val,40.0,3,6,100,500,data/instances/val/val01.csv
-val02,val,40.0,3,6,100,500,data/instances/val/val02.csv
+val_l20,val,20.0,3,6,100,500,data/instances/val/val_l20.csv
+val_l40,val,40.0,3,6,100,500,data/instances/val/val_l40.csv
+val_l60,val,60.0,3,6,100,500,data/instances/val/val_l60.csv

@@ -91,8 +91,9 @@ class InstanceCfg:
     case_pickers: List[int] = field(default_factory=lambda: [1, 2, 3])
     case_robots: List[int] = field(default_factory=lambda: [2, 4, 6])
 
-    n_val: int = 3
-    val_interarrival: float = 40.0
+    # Validation streams (checkpoint selection): one stream per arrival rate of
+    # the case grid, each evaluated on the fleet mini-grid (train.val_fleets).
+    val_streams_per_lambda: int = 1
 
     instances_dir: str = "data/instances"
 
@@ -115,27 +116,36 @@ class TrainCfg:
     perturb_pick_times: List[float] = field(default_factory=lambda: [15.0, 20.0])
     perturb_layout_prob: float = 0.34
 
-    # checkpoint selection and curve logging
+    # checkpoint selection and curve logging.  Validation covers a lambda x
+    # fleet mini-grid (each val stream x each fleet below) so the saved
+    # checkpoint is the best *across* load regimes, not just the centre one.
     eval_interval: int = 10           # rounds between periodic evaluations
+    val_fleets: List[List[int]] = field(default_factory=lambda: [[1, 2], [2, 4], [3, 6]])
     curve_cases: List[str] = field(default_factory=lambda: ["C06", "C13", "C15", "C24"])
 
 
 @dataclass
 class AlgoCfg:
-    """SAPPO (PPO) hyperparameters -- manuscript Table 4."""
+    """SAPPO (PPO) hyperparameters -- revised-manuscript Table 4."""
 
-    actor_lr: float = 1e-4
-    critic_lr: float = 3e-5
+    actor_lr: float = 1e-4            # decays linearly to actor_lr * lr_end_factor
+    critic_lr: float = 3e-5           # same schedule as the actor
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_eps: float = 0.2
     value_coef: float = 0.2
-    entropy_coef: float = 0.01
+    entropy_coef: float = 0.01        # decays linearly to entropy_coef_end
     max_grad_norm: float = 0.5
-    ppo_epochs: int = 2
-    minibatch_size: int = 64
+    ppo_epochs: int = 4               # upper bound; kl_target stops epochs early
+    minibatch_size: int = 256
     ratio_cap: float = 5.0
     advantage_clip: float = 5.0
+
+    # Global-policy stabilisers (R2 revision)
+    advantage_norm: str = "per_episode"   # per_episode | batch
+    kl_target: float = 0.02
+    lr_end_factor: float = 0.1
+    entropy_coef_end: float = 0.002
 
     cnn_output_dim: int = 256
     policy_hidden: int = 2048

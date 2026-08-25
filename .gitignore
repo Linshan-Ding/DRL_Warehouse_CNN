@@ -4,8 +4,14 @@ __pycache__/
 .vscode/
 .DS_Store
 
-# Run outputs: logs, checkpoints and figures are produced locally.
-# The modules that live in result/ are tracked; the run directories are not.
+# Trained policies: one file per algorithm, 50-85 MB each -- archive via a
+# release, not git.
+models/
+
+# Run outputs are produced locally; the modules in result/ stay tracked.
 result/*/
 !result/figs/
 result/stats_summary.csv
+
+# Generated LaTeX fragments (rerun experiments/run_40_stats_tables_plots.py).
+paper_assets/tables/

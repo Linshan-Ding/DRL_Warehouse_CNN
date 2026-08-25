@@ -1,11 +1,15 @@
-"""Policy and value networks (manuscript Section 4.2 and 4.5).
+"""Networks shared by every learning algorithm in this project.
 
-The encoder is the four-block convolutional network of Fig. 5: the state tensor
-is treated as a small image over the picking-point grid, convolved, and pooled
-into a single feature vector.  Because the pooling is adaptive, the *encoder* is
-independent of the grid size -- but the actor head is not: its output dimension
-is ``|A| = K*N_w*N_l + R*(N_w*N_l + 1)``.  A trained policy is therefore specific
-to one (N_w, N_l, K, R) configuration and cannot be transferred to another one.
+The encoder is the four-block convolutional network of Fig. 5, applied to the
+state tensor (4 spatial channels + 5 configuration planes).  The action head is
+sized for the resource *envelope* (k_max, r_max), so one set of parameters
+serves every (K, R, C, tau, layout) scenario -- resources that do not exist in
+the current scenario are simply never feasible.  Only the grid size (N_w, N_l)
+changes the input geometry and therefore requires training from scratch.
+
+``QNetwork`` reuses the same trunk with |A| outputs interpreted as Q-values, so
+the value-based baselines see exactly the same observation and action space as
+the policy-gradient methods.
 """
 from __future__ import annotations
 
@@ -66,6 +70,22 @@ class PolicyNetwork(nn.Module):
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         return self.mlp(self.cnn(state))
+
+
+class QNetwork(nn.Module):
+    """Q-value head over the envelope action space (DQN-family baselines)."""
+
+    def __init__(self, env_cfg: EnvCfg, algo_cfg):
+        super().__init__()
+        self.cnn = CNNFeatureExtractor(env_cfg.n_state_channels, algo_cfg.cnn_output_dim)
+        hidden = algo_cfg.policy_hidden
+        self.head = nn.Sequential(
+            nn.Linear(algo_cfg.cnn_output_dim, hidden), nn.ReLU(),
+            nn.Linear(hidden, env_cfg.n_actions),
+        )
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        return self.head(self.cnn(state))
 
 
 class ValueNetwork(nn.Module):

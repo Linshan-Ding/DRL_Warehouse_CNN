@@ -91,11 +91,26 @@ class RunLogger:
         row = {"step": step, "wall_clock_s": round(self.elapsed_s, 3)}
         row.update({key: value for key, value in metrics.items() if value is not None})
 
+        # Columns may appear later than the first write (e.g. the periodic
+        # evaluation metrics).  When that happens the whole CSV is rewritten
+        # with the widened header so no column is ever silently dropped.
+        new_keys = [key for key in row if self._fieldnames is None
+                    or key not in self._fieldnames]
         if self._writer is None:
             self._fieldnames = list(row)
             self._csv_file = open(self.csv_path, "w", newline="", encoding="utf-8")
             self._writer = csv.DictWriter(self._csv_file, fieldnames=self._fieldnames)
             self._writer.writeheader()
+        elif new_keys:
+            self._csv_file.close()
+            with open(self.csv_path, "r", newline="", encoding="utf-8") as fh:
+                existing = list(csv.DictReader(fh))
+            self._fieldnames = self._fieldnames + new_keys
+            self._csv_file = open(self.csv_path, "w", newline="", encoding="utf-8")
+            self._writer = csv.DictWriter(self._csv_file, fieldnames=self._fieldnames)
+            self._writer.writeheader()
+            for old_row in existing:
+                self._writer.writerow({key: old_row.get(key, "") for key in self._fieldnames})
         self._writer.writerow({key: row.get(key, "") for key in self._fieldnames})
         self._csv_file.flush()
 

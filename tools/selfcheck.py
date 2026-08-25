@@ -32,11 +32,11 @@ from environment.problem import mean_flow_time
 from tools import legacy_env
 
 TOLERANCE = 1e-9
-DEFAULT_STREAM = "data/instances/main/lam40.csv"
+DEFAULT_STREAM = "data/instances/cases/C18.csv"
 
 
 def _run_rule(cfg: Config, records, rule_name: str) -> Tuple[float, List[float], int]:
-    env = WarehouseEnv(cfg.env)
+    env = WarehouseEnv(cfg.scenario())
     rule = RulePolicy(rule_name)
     env.reset(build_orders(env.warehouse, records))
     rewards: List[float] = []
@@ -48,7 +48,7 @@ def _run_rule(cfg: Config, records, rule_name: str) -> Tuple[float, List[float],
 
 # --------------------------------------------------------------------------- #
 def check_reward_identity(cfg: Config, records, rule_name: str) -> bool:
-    env = WarehouseEnv(cfg.env)
+    env = WarehouseEnv(cfg.scenario())
     rule = RulePolicy(rule_name)
     env.reset(build_orders(env.warehouse, records))
     total = 0.0
@@ -71,14 +71,17 @@ def check_legacy_equivalence(cfg: Config, records, rule_name: str) -> bool:
 
     module = legacy_env.load(cfg.env)
     old = module.WarehouseEnv()
-    new = WarehouseEnv(cfg.env)
+    new = WarehouseEnv(cfg.scenario())
     rule = RulePolicy(rule_name)
 
     old_state = old.reset(legacy_env.build_orders(module, old, records))
     new_state = new.reset(build_orders(new.warehouse, records))
 
-    if not np.allclose(old_state, new_state):
-        print("  initial state tensors differ -> FAIL")
+    # The refactored observation appends configuration planes after the four
+    # spatial channels of the manuscript; physics equivalence is judged on the
+    # spatial channels only.
+    if not np.allclose(old_state, new_state[:4]):
+        print("  initial spatial channels differ -> FAIL")
         return False
 
     step = 0
@@ -98,8 +101,8 @@ def check_legacy_equivalence(cfg: Config, records, rule_name: str) -> bool:
         if abs(old_reward - new_reward) > TOLERANCE:
             print(f"  step {step}: reward differs {old_reward} vs {new_reward} -> FAIL")
             return False
-        if not np.allclose(old_state, new_state):
-            print(f"  step {step}: state tensors differ -> FAIL")
+        if not np.allclose(old_state, new_state[:4]):
+            print(f"  step {step}: spatial channels differ -> FAIL")
             return False
         if old_done != new_done:
             print(f"  step {step}: termination differs -> FAIL")

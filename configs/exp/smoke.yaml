@@ -1,8 +1,3 @@
-# Fast end-to-end check of the whole pipeline (minutes, not hours).
-# Not an experiment: the episode budget is far too small to learn anything.
-algo:
-  n_episodes: 3
-  eval_interval: 3
-  n_eval_episodes: 1
-run:
-  visdom_enabled: false
+# Minutes-scale end-to-end check; far too small to learn anything.
+train: {n_episodes: 4, n_workers: 2, eval_interval: 2}
+run: {visdom_enabled: false}

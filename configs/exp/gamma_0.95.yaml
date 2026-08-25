@@ -1,0 +1,2 @@
+# Discount-factor ablation arm (R2.3): gamma = 0.95.
+algo: {gamma: 0.95}

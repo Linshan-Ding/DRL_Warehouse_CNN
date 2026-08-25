@@ -67,7 +67,7 @@ class WarehouseEnv:
     @property
     def n_actions(self) -> int:
         return state_mod.n_actions(self.warehouse.n_pick_points,
-                                   self.cfg.n_pickers, self.cfg.n_robots)
+                                   self.cfg.k_max, self.cfg.r_max)
 
     @property
     def state_shape(self):
@@ -265,7 +265,7 @@ class WarehouseEnv:
         """Apply one action, advance to the next decision epoch, return the transition."""
         kind, actor, target = state_mod.decode_action(
             int(action_index), self.warehouse.n_pick_points,
-            len(self.pickers), len(self.robots))
+            self.cfg.k_max, self.cfg.r_max)
 
         if kind == "picker":
             self._apply_picker_action(self.pickers[actor],

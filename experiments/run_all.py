@@ -1,80 +1,71 @@
-"""按顺序批跑多个实验 —— 一键把 run 矩阵跑完。
+"""按顺序批跑 —— 一键执行整个 run 矩阵。
 
-先改 EXPERIMENTS 这个列表，把不想跑的注释掉，再右键 Run。注意下面标的耗时是
-开发容器 CPU（约 66 决策/秒）的量级，全开会跑好几天，GPU 上快很多。
-
-建议的顺序和优先级:
-    1. selfcheck + data + smoke   先确认环境没问题（分钟级）
-    2. e0                         基线复现，是其余实验的门槛（必跑）
-    3. e4 + e5                    直接关掉 Reviewer #2 的第 3、4 条（性价比最高）
-    4. e1 + e7                    Reviewer #1 的配比与载运容量
-    5. e2 + e6 + e8               规模、拣选时间、布局，视时间加码
-    6. e3 + stats                 汇总，几秒钟
+改 STAGES 列表（注释掉不想跑的）再右键 Run。依赖关系与并行性见 README 第 3 节：
+01 最先；10-14 互相独立（多机可并行，单机串行）；20-24 需要对应的 models；
+30/31/32 是额外训练；40 最后。单机上本脚本就是推荐的串行顺序。
 """
-import _bootstrap  # noqa: F401  必须最先导入
+import _bootstrap  # noqa: F401
 
 import time
 
 from _runner import banner
 
 # ==================== 配置区（改完右键 Run） ====================
-EXPERIMENTS = [
-    "selfcheck",     # 约 1 分钟   正确性自检，强烈建议保留
-    "data",          # 几秒        生成固定算例
-    # "smoke",       # 约 3 分钟   极小预算跑通全链路
-    "e0",            # 约 27-36 h  基线复现 x3（门槛，必跑）
-    # "e1",          # 约 27-36 h  人机配比 (1,1)/(3,1)/(4,2)
-    # "e2",          # 约 20-30 h  更大规模 (8,16)/(10,20)
-    "e4",            # 约 3-4 天   gamma 消融 3 档 x3 次
-    "e5",            # 约 1-1.5 天 状态通道消融 x3 次
-    # "e6",          # 约 18-24 h  tau_pick 敏感性
-    # "e7",          # 约 18-24 h  载运容量 C=2/3
-    # "e8",          # 约 9-12 h   中部横通道布局
-    "rules",         # 约 2 分钟   五条规则基线
-    "e3",            # 几秒        训练成本汇总
-    "stats",         # 几秒        统计聚合与出图
+STAGES = [
+    "selfcheck",     # ~1 分钟
+    "instances",     # 几秒
+    "train_sappo",   # 一次全局训练
+    "train_agdqn",
+    "train_hsddqn",
+    "train_soa_a2c",
+    "train_drlg",
+    "eval_main",     # ~1-2 小时
+    "eval_scale",
+    "eval_capacity",
+    "eval_picktime",
+    "eval_layout",
+    "gamma",         # 2 次额外训练
+    "state",         # 1 次额外训练
+    "grids",         # 每网格每算法 1 次训练
+    "finalize",      # 统计+表格+图
 ]
-EPISODES = None      # None = 用配置文件里的 2000；先填 20 可端到端演练整条流水线
+EPISODES = None      # 统一覆盖训练轮数；填 20 可整链路演练
 # ==============================================================
 
 _STEPS = {
-    "selfcheck": ("正确性自检", "run_00_selfcheck"),
-    "data": ("生成固定算例", "run_01_prepare_data"),
-    "smoke": ("冒烟测试", "run_smoke"),
-    "e0": ("E0 基线复现", "run_e0_baseline"),
-    "e1": ("E1 人机配比", "run_e1_ratio"),
-    "e2": ("E2 更大规模", "run_e2_scale"),
-    "e3": ("E3 训练成本汇总", "run_e3_training_cost"),
-    "e4": ("E4 gamma 消融", "run_e4_gamma"),
-    "e5": ("E5 状态通道消融", "run_e5_state_channels"),
-    "e6": ("E6 拣选时间敏感性", "run_e6_picktime"),
-    "e7": ("E7 载运容量", "run_e7_capacity"),
-    "e8": ("E8 布局变体", "run_e8_layout"),
-    "rules": ("规则基线", "run_rules_only"),
-    "stats": ("统计聚合与出图", "run_stats_and_plots"),
+    "selfcheck": ("正确性自检", "run_00_selfcheck", False),
+    "instances": ("生成固定算例", "run_01_make_instances", False),
+    "train_sappo": ("训练 SAPPO", "run_10_train_sappo", True),
+    "train_agdqn": ("训练 AG-DQN", "run_11_train_agdqn", True),
+    "train_hsddqn": ("训练 HSDDQN", "run_12_train_hsddqn", True),
+    "train_soa_a2c": ("训练 SOA+A2C", "run_13_train_soa_a2c", True),
+    "train_drlg": ("训练 DRLG", "run_14_train_drlg", True),
+    "eval_main": ("主对比评测", "run_20_eval_main", False),
+    "eval_scale": ("规模零样本评测", "run_21_eval_scale", False),
+    "eval_capacity": ("容量敏感性", "run_22_eval_capacity", False),
+    "eval_picktime": ("拣选时间敏感性", "run_23_eval_picktime", False),
+    "eval_layout": ("布局变体", "run_24_eval_layout", False),
+    "gamma": ("γ 消融", "run_30_gamma_ablation", True),
+    "state": ("状态通道消融", "run_31_state_ablation", True),
+    "grids": ("仓库网格敏感性", "run_32_warehouse_grids", True),
+    "finalize": ("统计+表格+图", "run_40_stats_tables_plots", False),
 }
 
-# 接受 EPISODES 参数的实验（训练类）
-_TRAINING_STEPS = {"smoke", "e0", "e1", "e2", "e4", "e5", "e6", "e7", "e8"}
 
-
-def main(experiments=EXPERIMENTS, episodes=EPISODES):
-    unknown = [key for key in experiments if key not in _STEPS]
+def main(stages=STAGES, episodes=EPISODES):
+    unknown = [s for s in stages if s not in _STEPS]
     if unknown:
-        raise ValueError(f"未知的实验代号: {unknown}；可选: {sorted(_STEPS)}")
-
-    banner("批量运行", "计划: " + " -> ".join(_STEPS[key][0] for key in experiments))
+        raise ValueError(f"未知阶段: {unknown}")
+    banner("批量运行", " -> ".join(_STEPS[s][0] for s in stages))
     started = time.time()
-
-    for position, key in enumerate(experiments, start=1):
-        title, module_name = _STEPS[key]
-        banner(f"[{position}/{len(experiments)}] {title}")
+    for i, stage in enumerate(stages, 1):
+        title, module_name, takes_episodes = _STEPS[stage]
+        banner(f"[{i}/{len(stages)}] {title}")
         module = __import__(module_name)
-        if episodes and key in _TRAINING_STEPS:
+        if episodes and takes_episodes:
             module.main(episodes=episodes)
         else:
             module.main()
-
     banner("全部完成", f"总耗时 {(time.time() - started) / 3600:.2f} 小时")
 
 

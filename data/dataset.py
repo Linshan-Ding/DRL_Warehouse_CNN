@@ -1,15 +1,16 @@
-"""Materialise the fixed evaluation and validation instances.
+"""Materialise the 27 fixed evaluation cases and the validation streams.
 
-Run once::
+A *case* is one cell of the 3 x 3 x 3 grid of the manuscript:
+``1/lambda in {20, 40, 60} x K in {1, 2, 3} x R in {2, 4, 6}``, numbered C01..C27
+with the arrival rate as the outer loop, then pickers, then robots (the same
+ordering as Table 5).  Every case owns an independent order stream, materialised
+once as ``data/instances/cases/Cxx.csv`` -- these files, not a random seed, are
+the reproduction baseline and are never regenerated once present.
 
-    python -m data.dataset --config configs/instance.yaml
+Validation streams (checkpoint selection during training) live under
+``data/instances/val/`` and are never reported.
 
-Products: ``data/instances/{main,val,large}/*.csv`` plus ``data/instances/index.csv``.
-
-Existing files are never overwritten -- these instances, not a random seed, are
-the reproduction baseline.  The three ``main`` streams are the ones that
-produced the submitted results: if the legacy files from the original repository
-layout are still present they are migrated verbatim rather than regenerated.
+Run: right-click ``experiments/run_01_make_instances.py``.
 """
 from __future__ import annotations
 
@@ -17,105 +18,89 @@ import argparse
 import csv
 import os
 import random
-import shutil
 from typing import Dict, List
 
 from configs.config import Config, add_config_arguments, config_from_args
-from data.generator import (FIELDNAMES, load_stream_csv, sample_order_records,
-                            save_stream_csv)
+from data.generator import load_stream_csv, sample_order_records, save_stream_csv
 from environment.problem import Warehouse
 
-INDEX_FIELDS = ("instance_id", "tier", "mean_interarrival", "n_orders", "n_rows", "path")
-
-# Streams shipped with the original repository, kept as the "main" tier.
-LEGACY_MAIN = {20.0: "data/data/instances/orders_20.csv",
-               40.0: "data/data/instances/orders_40.csv",
-               60.0: "data/data/instances/orders_60.csv"}
+INDEX_FIELDS = ("case", "tier", "mean_interarrival", "n_pickers", "n_robots",
+                "n_orders", "n_rows", "path")
 
 
-def _instance_path(cfg: Config, tier: str, name: str) -> str:
-    return os.path.join(cfg.instance.instances_dir, tier, f"{name}.csv")
+def case_specs(cfg: Config) -> List[Dict]:
+    specs = []
+    for i_lam, lam in enumerate(cfg.instance.case_interarrivals):
+        for i_k, k in enumerate(cfg.instance.case_pickers):
+            for i_r, r in enumerate(cfg.instance.case_robots):
+                cid = 9 * i_lam + 3 * i_k + i_r + 1
+                specs.append({"case": f"C{cid:02d}", "mean_interarrival": float(lam),
+                              "n_pickers": int(k), "n_robots": int(r)})
+    return specs
 
 
-def _register(rows: List[Dict[str, object]], instance_id: str, tier: str,
-              mean_interarrival: float, path: str) -> None:
-    records = load_stream_csv(path)
-    n_orders = len({row["order_id"] for row in records})
-    rows.append({"instance_id": instance_id, "tier": tier,
-                 "mean_interarrival": mean_interarrival, "n_orders": n_orders,
-                 "n_rows": len(records), "path": path})
-
-
-def make_eval_instances(cfg: Config) -> str:
+def make_instances(cfg: Config) -> str:
     warehouse = Warehouse(cfg.env)
-    inst = cfg.instance
     rng = random.Random()
-    rows: List[Dict[str, object]] = []
+    rows: List[Dict] = []
 
-    # --- main tier: one stream per arrival rate ------------------------- #
-    for mean_interarrival in inst.main_interarrivals:
-        name = f"lam{int(mean_interarrival)}"
-        path = _instance_path(cfg, "main", name)
+    cases_dir = os.path.join(cfg.instance.instances_dir, "cases")
+    os.makedirs(cases_dir, exist_ok=True)
+    for spec in case_specs(cfg):
+        path = os.path.join(cases_dir, f"{spec['case']}.csv")
         if not os.path.exists(path):
-            legacy = LEGACY_MAIN.get(float(mean_interarrival))
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            if legacy and os.path.exists(legacy):
-                shutil.copyfile(legacy, path)
-                print(f"[main] migrated published stream {legacy} -> {path}")
-            else:
-                save_stream_csv(sample_order_records(warehouse, inst, inst.n_orders,
-                                                     mean_interarrival, rng), path)
-                print(f"[main] generated {path}")
-        _register(rows, name, "main", mean_interarrival, path)
+            save_stream_csv(sample_order_records(warehouse, cfg.instance,
+                                                 cfg.instance.n_orders,
+                                                 spec["mean_interarrival"], rng), path)
+            print(f"[case] generated {path}  (1/lambda={spec['mean_interarrival']:g} "
+                  f"K={spec['n_pickers']} R={spec['n_robots']})")
+        records = load_stream_csv(path)
+        rows.append({**spec, "tier": "case",
+                     "n_orders": len({row["order_id"] for row in records}),
+                     "n_rows": len(records), "path": path})
 
-    # --- validation tier: checkpoint selection only --------------------- #
-    for i in range(inst.n_val):
-        name = f"val{i:02d}"
-        path = _instance_path(cfg, "val", name)
+    val_dir = os.path.join(cfg.instance.instances_dir, "val")
+    os.makedirs(val_dir, exist_ok=True)
+    for i in range(cfg.instance.n_val):
+        path = os.path.join(val_dir, f"val{i:02d}.csv")
         if not os.path.exists(path):
-            save_stream_csv(sample_order_records(warehouse, inst, inst.n_orders,
-                                                 inst.val_interarrival, rng), path)
+            save_stream_csv(sample_order_records(warehouse, cfg.instance,
+                                                 cfg.instance.n_orders,
+                                                 cfg.instance.val_interarrival, rng), path)
             print(f"[val] generated {path}")
-        _register(rows, name, "val", inst.val_interarrival, path)
+        records = load_stream_csv(path)
+        rows.append({"case": f"val{i:02d}", "tier": "val",
+                     "mean_interarrival": cfg.instance.val_interarrival,
+                     "n_pickers": cfg.env.n_pickers, "n_robots": cfg.env.n_robots,
+                     "n_orders": len({row["order_id"] for row in records}),
+                     "n_rows": len(records), "path": path})
 
-    # --- large tier: arrival rates outside the parameter table ---------- #
-    for mean_interarrival in inst.large_interarrivals:
-        name = f"lam{int(mean_interarrival)}"
-        path = _instance_path(cfg, "large", name)
-        if not os.path.exists(path):
-            save_stream_csv(sample_order_records(warehouse, inst, inst.large_n_orders,
-                                                 mean_interarrival, rng), path)
-            print(f"[large] generated {path}")
-        _register(rows, name, "large", mean_interarrival, path)
-
-    index_path = os.path.join(inst.instances_dir, "index.csv")
-    os.makedirs(os.path.dirname(index_path) or ".", exist_ok=True)
+    index_path = os.path.join(cfg.instance.instances_dir, "index.csv")
     with open(index_path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=INDEX_FIELDS)
-        writer.writeheader()
-        writer.writerows(rows)
+        writer.writeheader(); writer.writerows(rows)
     print(f"[index] {len(rows)} instances -> {index_path}")
     return index_path
 
 
-def instance_path(cfg: Config, tier: str, mean_interarrival: float) -> str:
-    return _instance_path(cfg, tier, f"lam{int(mean_interarrival)}")
-
-
-def read_index(cfg: Config) -> List[Dict[str, str]]:
+def read_index(cfg: Config, tier: str = "case") -> List[Dict[str, str]]:
     index_path = os.path.join(cfg.instance.instances_dir, "index.csv")
     if not os.path.exists(index_path):
         raise FileNotFoundError(
-            f"{index_path} not found -- run `python -m data.dataset` first")
+            f"{index_path} not found -- run experiments/run_01_make_instances.py first")
     with open(index_path, "r", newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
+        return [row for row in csv.DictReader(fh) if row["tier"] == tier]
+
+
+def case_path(cfg: Config, case: str) -> str:
+    return os.path.join(cfg.instance.instances_dir, "cases", f"{case}.csv")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     add_config_arguments(parser)
     args, extra = parser.parse_known_args()
-    make_eval_instances(config_from_args(args, extra))
+    make_instances(config_from_args(args, extra))
 
 
 if __name__ == "__main__":

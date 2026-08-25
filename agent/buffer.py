@@ -96,3 +96,58 @@ class RolloutBuffer:
         order = np.random.permutation(len(self.rewards))
         for start in range(0, len(order), batch_size):
             yield order[start:start + batch_size]
+
+
+class ReplayBuffer:
+    """Uniform experience replay for the DQN-family baselines.
+
+    States are stored as float16 to keep 100k transitions of a (9, 9, 20)
+    tensor around 700 MB.  The feasibility mask of the *next* state is stored
+    as an index list so that the bootstrap maximum only ranges over feasible
+    actions.
+    """
+
+    def __init__(self, capacity: int):
+        self.capacity = int(capacity)
+        self.states: List[np.ndarray] = []
+        self.actions: List[int] = []
+        self.rewards: List[float] = []
+        self.next_states: List[np.ndarray] = []
+        self.dones: List[bool] = []
+        self.next_legals: List[Sequence[int]] = []
+        self._cursor = 0
+
+    def __len__(self) -> int:
+        return len(self.rewards)
+
+    def push(self, state, action, reward, next_state, done, next_legal) -> None:
+        entry = (np.asarray(state, dtype=np.float16), int(action), float(reward),
+                 np.asarray(next_state, dtype=np.float16), bool(done), list(next_legal))
+        if len(self.rewards) < self.capacity:
+            self.states.append(entry[0]); self.actions.append(entry[1])
+            self.rewards.append(entry[2]); self.next_states.append(entry[3])
+            self.dones.append(entry[4]); self.next_legals.append(entry[5])
+        else:
+            i = self._cursor
+            (self.states[i], self.actions[i], self.rewards[i],
+             self.next_states[i], self.dones[i], self.next_legals[i]) = entry
+            self._cursor = (i + 1) % self.capacity
+
+    def sample(self, batch_size: int, n_actions: int, device: str):
+        idx = np.random.randint(0, len(self.rewards), size=min(batch_size, len(self.rewards)))
+        states = torch.as_tensor(
+            np.stack([self.states[i] for i in idx]).astype(np.float32), device=device)
+        next_states = torch.as_tensor(
+            np.stack([self.next_states[i] for i in idx]).astype(np.float32), device=device)
+        actions = torch.as_tensor([self.actions[i] for i in idx], dtype=torch.long, device=device)
+        rewards = torch.as_tensor([self.rewards[i] for i in idx], dtype=torch.float32, device=device)
+        dones = torch.as_tensor([float(self.dones[i]) for i in idx], device=device)
+        invalid_next = torch.ones((len(idx), n_actions), dtype=torch.bool, device=device)
+        rows, cols = [], []
+        for row, i in enumerate(idx):
+            legal = self.next_legals[i]
+            rows.extend([row] * len(legal)); cols.extend(legal)
+        if rows:
+            invalid_next[torch.as_tensor(rows, device=device),
+                         torch.as_tensor(cols, device=device)] = False
+        return states, actions, rewards, next_states, dones, invalid_next

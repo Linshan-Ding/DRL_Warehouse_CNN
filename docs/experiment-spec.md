@@ -1,201 +1,104 @@
 # Experiment specification
 
-Contract for every experiment in this repository. Code, results and manuscript
-all refer back to this file: if an experiment is not described here it should
-not be run, and if a number is not produced by one of the files listed in
-Section 3 it should not appear in the paper.
+Contract for every experiment in this repository. If an experiment is not here
+it should not run; if a number is not produced by a file in Section 4 it should
+not appear in the paper.
 
 | | |
 |---|---|
-| Version | 1.0 |
-| Status | active |
-| Paper | *Spatially-Aware Deep Reinforcement Learning for Human-Robot Collaborative Order Picking Optimization in Smart Warehouse Systems* (CAIE, second revision) |
-| How to run | right-click Run on a script under `experiments/`; see `README.md` (Chinese) / `README_EN.md` (English) |
+| Version | 2.0 |
+| Status | active (full rebuild — replaces every result of the submitted rounds) |
+| Paper | *Spatially-Aware DRL for Human-Robot Collaborative Order Picking* (CAIE, R2) |
+| How to run | right-click the scripts under `experiments/`; see `README.md` / `README_EN.md` |
 
 ### Change log
 
-| Version | Change | Reason | Affects |
-|---|---|---|---|
-| 1.1 | Added E9 (capacity x state channels), the rule capacity sweep, and `paper_assets/make_tables.py`; recorded the E0 reproduction outcome. | E7 showed SAPPO does not exploit batching while E5 showed the per-robot channels are redundant at C=1 — E9 tests the interaction; E0 gave 1602.6 ± 62.9 against the submitted 1379.89, so supplementary results are compared within this pipeline only. | R1.5 / R2.4 responses; every table of the revision |
-| 1.0 | Initial specification, reverse-engineered from the submitted `manuscript.tex` and the second-round reviewer comments. | The repository had no specification; the supplementary experiments requested by the reviewers need one. | all downstream stages |
+| Version | Change | Reason |
+|---|---|---|
+| 2.0 | Full rebuild: single global policy per algorithm (envelope head K≤10/R≤20 + configuration planes), per-episode scenario randomisation, four RL baselines implemented as the cited methods' base algorithms, D̄ redefined as true wall-clock decision time, 27 independent case streams, 3-stochastic-sample evaluation, multi-process collection. All previous results are superseded. | The submitted D̄ column mixed simulated-time quantities; baselines were absent from the repository; per-configuration retraining was the reviewers' central objection (R2.1). |
+| 1.x | (history) per-configuration training, E0–E9 supplementary experiments. | superseded |
 
 ---
 
-## 1. Problem and MDP
+## 1. Problem and MDP (unchanged physics)
 
-A parts-to-picker warehouse: `R` AMRs transport orders, `K` human pickers
-retrieve items at picking points. Orders arrive online as a Poisson process.
-The objective is the mean order flow time `F̄` (Eq. 13).
+Discrete-event simulation verified event-equivalent to the implementation that
+produced the submitted results (`tools/selfcheck.py`, gate 2). Reward
+`r_t = F̄_{t-1} − F̄_t`; undiscounted return ≡ −F̄_final (gate 1). Carrying
+capacity C generalises assumption (A1); C = 1 degenerates exactly (gate 3).
 
-| Element | Definition | Code |
+**Observation** `o_t = (s_t, M_t)`: 4 spatial channels + 5 configuration planes
+(K/k_max, R/r_max, C/c_max, τ/τ_ref, layout); optional +2 per-robot channels
+(ablation). **Action space**: envelope (k_max=10, r_max=20) ⇒ |A| = 5420 at the
+9×20 grid; infeasible-by-scenario resources are permanently masked.
+
+## 2. Methods
+
+| Column | Base algorithm | Notes |
 |---|---|---|
-| Decision epoch | an idle picker can be dispatched to a point where robots wait, **or** an idle robot carrying orders needs a routing decision | `environment/env.py::_advance_to_decision_epoch` |
-| State `s_t` | 4 channels over the `N_w x N_l` picking-point grid: robot queue, picker presence, unpicked items, unassigned-order items | `environment/state.py::build_state` |
-| Mask `M_t` | feasible actions, derived from per-robot residual demand and per-picker idleness | `environment/state.py::legal_action_indices` |
-| Observation | `o_t = (s_t, M_t)` — the mask is part of the observation, not post-processing | `agent/ppo.py` |
-| Action | one flat index over `K·N_w·N_l` picker assignments, `R·N_w·N_l` robot routings and `R` return-to-depot moves | `environment/state.py` |
-| Reward | `r_t = F̄_{t-1} − F̄_t` (Eq. 14) | `environment/env.py::compute_reward` |
-| Termination | every order has arrived, been served and returned to the depot | `environment/env.py::_next_event_time` |
+| SAPPO | PPO | Table 4 hyperparameters |
+| AG-DQN / HSDDQN | DQN / Double DQN | replay 100k (float16), target 2000, ε 1→0.05 |
+| SOA+A2C / DRLG | A2C (n=200) / short-rollout AC (n=20) | Table 6 common settings |
+| MQ-ND, MQ-MinRQ, MQ-MI, MI-MinRQ, MI-MI | deterministic dispatching rules | Section 5.3 |
 
-**Reward identity.** Because `F̄_0 = 0`, the *undiscounted* return of an episode
-equals `−F̄_final` exactly. `tools/selfcheck.py` asserts this. Under discounting
-(`γ = 0.99`) the return instead equals
-`F̄_0 − γ^{T−1} F̄_T − (1−γ) Σ_t γ^{t−1} F̄_t`, so the learning objective stays
-aligned with the operational one but is not identical to it. Experiment E4
-measures how much this matters.
+One parameter file per RL algorithm (`models/<algo>.pt`), selected by greedy
+validation on the fixed val streams; representative-case curves (C06/C13/C15/
+C24) are logged for Fig. 8 only.
 
-**Order release is a system rule, not a policy decision.** Waiting orders are
-handed FIFO to robots standing idle at the depot, up to the carrying capacity
-`C`. Only picker assignment and robot routing are learned.
+## 3. Training and evaluation protocol
 
-**Carrying capacity.** `C = 1` is assumption (A1) of the submitted manuscript.
-`C > 1` lets an AMR take several orders per cycle, visit the union of their
-required picking points and be packed once per order on return. `C = 1`
-reproduces the submitted model event for event.
+* **Training**: every episode samples a scenario from the parameter table —
+  70 % the 27-case grid, 15 % scale/extreme fleets {(4,8),(5,10),(6,12),(8,16),
+  (10,20),(1,1),(3,1),(4,2)}, 15 % perturbations (C∈{2,3}, τ∈{15,20}, middle
+  cross-aisle) — plus a fresh order stream. Parallel episode collection
+  (spawn workers, shared-memory parameter sync), GPU minibatch updates between
+  rounds. No random seeds anywhere; repetition = independent stochastic runs.
+* **Evaluation**: 27 fixed case streams C01–C27 (3×3×3 grid, λ outer / K / R
+  inner). RL: 3 stochastic samples per case (PG: policy sampling; value-based:
+  ε=0.05 greedy) → mean ± std. Rules: deterministic, once. Sensitivity studies
+  evaluate the SAME policy files zero-shot on the nine λ=40 streams with the
+  scenario overridden; only the warehouse grid retrains (12×20, 9×30, own
+  streams). Evaluation is single-process so that D̄ is clean.
+* **Metrics**: F̄ (mean order flow time); D̄ = wall-clock ms per decision
+  (action computation only); `sim_time_per_decision` = makespan/#decisions is a
+  diagnostic and never reported as D̄.
+* **Statistics**: paired t-test, Wilcoxon signed-rank, Cohen's d over the 27
+  per-case means, each method vs SAPPO (Tables 8–9).
 
----
+## 4. Data landing list
 
-## 2. Evaluation setup
-
-### 2.1 Instance parameter table
-
-| Parameter | Symbol | Value |
+| File | Produced by | Serves |
 |---|---|---|
-| Aisles | `N_w` | 9 |
-| Picking points per aisle | `N_l` | 20 |
-| Rack width / point spacing / aisle widths / entrance | `S_w, S_l, S_a, S_b, S_d` | 1.0, 1.0, 2.0, 2.0, 2.0 m |
-| Robots | `R` | {2, 4, 6} (extended by E1/E2) |
-| Pickers | `K` | {1, 2, 3} (extended by E1/E2) |
-| Robot / picker speed | `v_r, v_k` | 3.0 / 0.75 m/s |
-| Mean inter-arrival time | `1/λ` | {20, 40, 60} s |
-| Picking / packing time | `τ_pick, τ_pack` | 10.0 / 20.0 s |
-| Orders per instance | | 100, 5 items each |
+| `data/instances/cases/C01..C27.csv`, `val/*.csv`, `index.csv` | `run_01` | all evaluations |
+| `models/<algo>.pt` (+ `_g*`, `_plus`, `_<grid>` variants) | `run_10..14`, `run_30..32` | all evaluations |
+| `result/train_*/log.csv` (`curve_C*` columns), `training_cost.csv` | trainings | Fig. 8, R2.1 cost table |
+| `result/main/eval_results.csv` | `run_20` | Tables 5, 7, 8, 9; Figs 9–11 |
+| `result/scale/K*_R*/eval_results.csv` | `run_21` | Table 10 |
+| `result/capacity/c*/`, `picktime/tau*/`, `layout/three/` | `run_22..24` | R1.5 / R1.4 / R1.3 tables |
+| `result/gamma/g*/`, `result/state_plus/` | `run_30..31` | R2.3 / R2.4 tables |
+| `result/grid/<AxB>/eval_results.csv` | `run_32` | Tables 11, 12 |
+| `result/stats_summary.csv`, `paper_assets/tables/*.tex`, `result/figures/` | `run_40` | manuscript + response letter |
 
-### 2.2 Instance tiers
+## 5. Reviewer-comment map
 
-Materialised once by `experiments/run_01_prepare_data.py`, one CSV per stream,
-never regenerated. **These files, not a random seed, are the reproduction baseline** —
-no seed is fixed anywhere in the project, and independent repetitions come from
-repeated training runs.
-
-| Tier | Streams | Purpose |
-|---|---|---|
-| `main` | 3 (`1/λ` ∈ {20, 40, 60}) | the 27 published cases C1–C27, crossed with the resource settings from `configs/env.yaml` |
-| `val` | 3 (`1/λ` = 40) | checkpoint selection during training; never reported |
-| `large` | 2 (`1/λ` ∈ {10, 100}, 200 orders) | arrival rates outside the parameter table |
-
-The three `main` streams are the ones that produced the submitted results and
-are carried over verbatim from the original repository layout.
-
-**Case numbering.** `case_id = 9·i_λ + 3·i_K + i_R + 1` with `λ` the outer loop,
-then pickers, then robots. Verified against the manuscript: C18 = (40, 3, 6) as
-stated in Section 5.6, and the C1/C27 extremes match Table 5.
-
-### 2.3 Methods compared
-
-| Method | Status |
+| Comment | Answered by |
 |---|---|
-| SAPPO | `agent/ppo.py` |
-| MQ-ND, MQ-MinRQ, MQ-MI, MI-MinRQ, MI-MI | `baselines/rules.py` |
-| AG-DQN, HSDDQN, SOA+A2C, DRLG | **not in this repository yet** — see `baselines/rl/README.md` |
+| R1.1 roles | text + Fig. 2 redraw (no data) |
+| R1.2 ratios | `tab_ratio` (main + scale reorganised by K:R) |
+| R1.3 racks/layout | Eq. (2) text + `tab_layout` |
+| R1.4 rack levels | assumption (A8) + `tab_picktime` |
+| R1.5 capacity | generalised (A1)/Eq. (5) + `tab_capacity` |
+| R1.6 larger fleets | `tab_scale` rows (8,16), (10,20) + `tab_training_cost` |
+| R2.1 transfer/retraining | ONE policy zero-shot across fleets (`tab_scale`); grids retrain (`tab_grid`); cost table |
+| R2.2 tuning | text (matched common settings; no exhaustive search, incl. SAPPO) |
+| R2.3 discounting | Abel identity in text + `tab_gamma` |
+| R2.4 state sufficiency | o_t=(s_t,M_t) formalisation + `tab_state` |
 
-Until the four RL baselines are archived, any new table can only carry SAPPO and
-the five dispatching rules.
+## 6. Registered deviations
 
-### 2.4 Metrics
-
-| Metric | Meaning |
+| Deviation | Reason |
 |---|---|
-| `mean_flow_time` (`F̄`) | mean of (completion − arrival) over completed orders — the objective |
-| `decision_time_ms` | **wall-clock milliseconds per decision**, i.e. computational effort |
-| `sim_time_per_decision` | simulated seconds per decision epoch = makespan / #epochs |
-
-`decision_time_ms` and `sim_time_per_decision` measure entirely different
-things and are logged as separate columns on purpose. Measured on the reference
-machine: a dispatching rule needs ≈0.03 ms per decision, SAPPO ≈3.4 ms on CPU,
-while consecutive decision epochs are ≈7 simulated seconds apart.
-
-### 2.5 Repetitions and statistics
-
-Independent runs come from repeated training (no seed is fixed). Report at least
-3 runs per ablation configuration and give mean ± standard deviation with the
-run count stated. Method comparisons are **paired over the shared fixed
-instances**: paired t-test, Wilcoxon signed-rank test and Cohen's d, as in
-Section 5.5 of the manuscript (`result/stats.py`).
-
----
-
-## 3. Data landing list
-
-| File | Produced by | Key columns |
-|---|---|---|
-| `data/instances/<tier>/*.csv` | `run_01_prepare_data.py` | `order_id, arrival_time, item_id, pick_point_id` |
-| `data/instances/index.csv` | `run_01_prepare_data.py` | `instance_id, tier, mean_interarrival, n_orders, n_rows, path` |
-| `result/<run>/log.csv` | any training script (E0–E8) | `step, episode, mean_flow_time, reward_sum, n_decisions, policy_loss, value_loss, entropy, approx_kl, clip_fraction, sps, wall_clock_s, gpu_mem_gb, eval_flow_mean, eval_flow_std` |
-| `result/<run>/training_cost.csv` | any training script; aggregated by `run_e3_training_cost.py` | `n_actions, n_parameters, n_episodes, total_decisions, wall_clock_s, decisions_per_second, device` + configuration |
-| `result/<run>/eval_results.csv` | every experiment script | `instance_id, tier, mean_interarrival, case_id, method, run_id, n_pickers, n_robots, robot_capacity, state_channels, layout, pick_time, gamma, mean_flow_time, makespan, n_decisions, decision_time_ms, sim_time_per_decision, solve_wall_clock_s` |
-| `result/<run>/config_snapshot.yaml`, `run_info.json` | any training script | effective configuration, git commit, device |
-| `result/stats_summary.csv` | `run_stats_and_plots.py` | per-method summary and paired tests |
-| `result/figures/*.pdf/.png` | `run_stats_and_plots.py` | draft figures |
-
----
-
-## 4. Reviewer comment → experiment → data mapping
-
-Every second-round comment either maps to an experiment producing specific
-columns, or is explicitly marked as a text-only revision.
-
-| Comment | Requirement | Experiment | Data | Serves |
-|---|---|---|---|---|
-| R1.1 | roles of humans and robots | — (text) | — | new roles table in Section 3.1 |
-| R1.2 | 1:1, 1:n, n:1 configurations | **E1** `(K,R)` ∈ {(1,1), (3,1), (4,2)} | `eval_results.csv` → `n_pickers, n_robots, mean_flow_time` | new ratio table |
-| R1.3 | movement between racks | **E8** middle cross-aisle | `eval_results.csv` → `layout` | Eq. (2) discussion, Fig. 2 |
-| R1.4 | rack levels above the first | **E6** `τ_pick` ∈ {10, 15, 20} | `eval_results.csv` → `pick_time` | new assumption (A8) + sensitivity |
-| R1.5 | robot carrying capacity | **E7** `C` ∈ {1, 2, 3} | `eval_results.csv` → `robot_capacity` | generalised (A1), Eq. (5) capacity constraint |
-| R1.6 | larger fleets | **E2** `(K,R)` ∈ {(8,16), (10,20)} | `eval_results.csv`, `training_cost.csv` | extension of Table 10 |
-| R2.1 | retraining vs transfer, training cost | **E3** (instrumentation, rides along with E0–E2) | `training_cost.csv` → `n_actions, n_parameters, wall_clock_s` | explicit "trained from scratch" statement + cost table |
-| R2.2 | hyperparameter selection | — (text) | `configs/algo.yaml` provenance | moderated claim in Section 5.4 |
-| R2.3 | discount factor vs telescoping | **E4** `γ` ∈ {0.95, 0.99, 1.0}, ≥3 runs each | `eval_results.csv` → `gamma` | corrected Eq. (14) discussion |
-| R2.4 | state sufficiency | **E5** `base` vs `plus_agent` channels, ≥3 runs each | `eval_results.csv` → `state_channels` | `o_t = (s_t, M_t)` formalisation + ablation |
-| R1.5 + R2.4 | does per-robot state matter under batching? | **E9** `plus_agent` x `C` ∈ {2, 3} | `eval_results.csv` → `robot_capacity, state_channels` | strengthens both responses |
-| R1.5 | system-level batching-benefit curve | **rule sweep** `C` ∈ {1..5}, no training | `eval_results.csv` → `robot_capacity` | capacity discussion |
-| — | reproduction gate | **E0** case C18 | `eval_results.csv` | credibility of everything above; outcome: 1602.6 ± 62.9 vs submitted 1379.89 — see Section 6 |
-
----
-
-## 5. Registered deviations
-
-Deviations from the code-generation guideline, each with its reason.
-
-| Deviation | Guideline default | Reason |
-|---|---|---|
-| `algo.gamma = 0.99` | `1.0` for combinatorial problems | Table 4 of the submitted manuscript reports 0.99; reproducing the submitted results takes precedence. `γ = 1.0` is one arm of E4. |
-| `instance.train_mode = fixed` | sample a fresh instance every episode | The submitted results were produced by training on the fixed `main` stream matching the case's arrival rate. E0 could not reproduce them otherwise. `sampled` is available and is the better setting for future work. |
-| No multiprocess environment workers | introduce them when the environment is hard to tensorise | This *is* such an environment, but the guideline requires a measured justification (profiler showing environment stepping dominates), and no training run has been executed yet. The rollout collector is kept replaceable; revisit once `sps` has been measured. |
-| PPO update evaluates minibatches in one forward pass | — | The submitted implementation looped over transitions individually. The objective is unchanged; only the execution differs. |
-| Four RL baselines absent | baselines run at equal budget | Their implementations are not in this repository. They must be archived under `baselines/rl/` before resubmission. |
-
----
-
-## 6. Open items before resubmission
-
-1. **Archive the four RL baselines.** The manuscript's data-availability
-   statement points at this repository; the comparison in Tables 5–12 cannot be
-   reproduced from it today.
-2. **Reconcile the dispatching-rule numbers.** With this simulator MQ-ND on case
-   C18 gives `F̄ = 1892.17` against the 1922.517 of Table 5 (−1.6 %), and
-   `sim_time_per_decision = 6.808` against the reported `D̄ = 6.827` (−0.3 %).
-   The residual difference comes from tie-breaking details of the original
-   dispatching script, which is not in the repository. Regenerating Table 5 with
-   this implementation would put every method on one simulator — which is
-   exactly what the fairness claim in Section 5.4 needs.
-3. **Fix the decision-time column.** The values reported as `D̄` equal
-   makespan / #decision epochs, not computation time; see Section 2.4. Measured
-   on the author's GPU machine: SAPPO ≈ 1.7 ms per decision, a rule ≈ 0.02 ms,
-   against ≈ 6.5 simulated seconds between consecutive epochs.
-4. **Present supplementary results within this pipeline only.** E0 gives
-   `F̄ = 1602.6 ± 62.9` for C18 against the submitted 1379.89 (2.8 sd away), and
-   the reproduced ranking is softer (SAPPO first on `lam40`, second on `lam20`,
-   fourth on `lam60` with a 6 % gap to the best rule). The submitted numbers
-   remain the record of the original implementation; new tables anchor on this
-   pipeline's own C18 row and state the protocol difference in a footnote.
+| Baselines are base algorithms under the cited names | the cited designs are structurally tied to other problems; footnote in the manuscript |
+| γ = 0.99 default (not 1.0) | Table 4 of the paper; γ = 1.0 is an ablation arm |
+| No random seeds | fixed case CSVs + independent stochastic runs are the reproduction baseline |
+| Evaluation single-process | keeps the D̄ timing clean |

@@ -198,8 +198,37 @@ class WarehouseEnv:
                 "simulation stalled with work remaining: "
                 f"not_arrived={len(self.orders_not_arrived)} "
                 f"unassigned={len(self.orders_unassigned)} "
-                f"uncompleted={len(self.orders_uncompleted)} at t={self.current_time}")
+                f"uncompleted={len(self.orders_uncompleted)} at t={self.current_time}\n"
+                + self._stall_report())
         return None
+
+    def _stall_report(self) -> str:
+        """Entity dump appended to the stall guard so one traceback localises
+        which resource lost its event bookkeeping."""
+        lines = []
+        for robot in self.robots:
+            lines.append(
+                f"  robot {robot.robot_id}: state={robot.state} "
+                f"orders={len(robot.orders)} remaining_items={len(robot.item_pick_order)} "
+                f"pick_point={getattr(robot.pick_point, 'point_id', None)} "
+                f"stamps=({robot.move_to_pick_point_time}, "
+                f"{robot.pick_point_complete_time}, {robot.move_to_depot_time})")
+        for picker in self.pickers:
+            lines.append(
+                f"  picker {picker.picker_id}: state={picker.state} "
+                f"pick_point={getattr(picker.pick_point, 'point_id', None)} "
+                f"stamps=({picker.pick_start_time}, {picker.pick_end_time})")
+        for point in self.warehouse.pick_points_list:
+            if point.robot_queue or point.picker is not None:
+                lines.append(
+                    f"  point {point.point_id}: "
+                    f"queue={[r.robot_id for r in point.robot_queue]} "
+                    f"picker={getattr(point.picker, 'picker_id', None)}")
+        for order in self.orders_uncompleted:
+            holder = [r.robot_id for r in self.robots if order in r.orders]
+            lines.append(f"  order {order.order_id}: "
+                         f"unpicked={len(order.unpicked_items)} on_robot={holder}")
+        return "\n".join(lines)
 
     def _handle_events(self) -> None:
         now = self.current_time
@@ -263,8 +292,23 @@ class WarehouseEnv:
     # ------------------------------------------------------------------ #
     def step(self, action_index: int):
         """Apply one action, advance to the next decision epoch, return the transition."""
+        action_index = int(action_index)
+        legal = self.legal_actions()
+        if action_index not in legal:
+            # An illegal action (a degenerate network output slipping past the
+            # mask, or a caller bug) silently detaches the picker/point
+            # bookkeeping and only surfaces much later as a stalled
+            # simulation -- reject it at the door instead.
+            decoded = (state_mod.decode_action(action_index,
+                                               self.warehouse.n_pick_points,
+                                               self.cfg.k_max, self.cfg.r_max)
+                       if 0 <= action_index < self.n_actions else "out of range")
+            raise RuntimeError(
+                f"illegal action {action_index} ({decoded}) at t={self.current_time}: "
+                f"{len(legal)} legal actions at this decision epoch")
+
         kind, actor, target = state_mod.decode_action(
-            int(action_index), self.warehouse.n_pick_points,
+            action_index, self.warehouse.n_pick_points,
             self.cfg.k_max, self.cfg.r_max)
 
         if kind == "picker":

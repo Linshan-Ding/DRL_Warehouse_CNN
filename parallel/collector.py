@@ -66,47 +66,58 @@ def _worker_main(worker_id: int, algo_name: str, cfg_dict: dict, shared_params,
         if task is None:
             return
         exploration, scenario = task
-        agent.load_actor_state(shared_params)   # reads the shared tensors
+        try:
+            agent.load_actor_state(shared_params)   # reads the shared tensors
 
-        env_cfg = cfg.scenario(**scenario["env"])
-        env = WarehouseEnv(env_cfg)
-        orders = sample_orders(env.warehouse, cfg.instance, cfg.instance.n_orders,
-                               scenario["interarrival"], rng)
-        state = env.reset(orders)
+            env_cfg = cfg.scenario(**scenario["env"])
+            env = WarehouseEnv(env_cfg)
+            orders = sample_orders(env.warehouse, cfg.instance, cfg.instance.n_orders,
+                                   scenario["interarrival"], rng)
+            state = env.reset(orders)
 
-        states, actions, rewards, dones, legals = [], [], [], [], []
-        log_probs, values = [], []
-        for _ in range(env_cfg.max_steps):
-            legal = env.legal_actions()
-            action, log_prob, value = agent.act_collect(env, state, exploration)
-            states.append(np.asarray(state, dtype=np.float32))
-            actions.append(action); legals.append(legal)
-            if agent.needs_log_probs:
-                log_probs.append(log_prob); values.append(value)
-            state, reward, done, _ = env.step(action)
-            rewards.append(reward); dones.append(done)
-            if done:
-                break
+            states, actions, rewards, dones, legals = [], [], [], [], []
+            log_probs, values = [], []
+            for _ in range(env_cfg.max_steps):
+                legal = env.legal_actions()
+                action, log_prob, value = agent.act_collect(env, state, exploration)
+                states.append(np.asarray(state, dtype=np.float32))
+                actions.append(action); legals.append(legal)
+                if agent.needs_log_probs:
+                    log_probs.append(log_prob); values.append(value)
+                state, reward, done, _ = env.step(action)
+                rewards.append(reward); dones.append(done)
+                if done:
+                    break
 
-        result_queue.put({
-            "worker_id": worker_id,
-            "states": np.asarray(states, dtype=np.float32),
-            "actions": actions, "rewards": rewards, "dones": dones, "legals": legals,
-            "log_probs": log_probs if agent.needs_log_probs else None,
-            "values": values if agent.needs_log_probs else None,
-            "final_state": np.asarray(state, dtype=np.float32),
-            "final_legal": env.legal_actions() if not env.done else [],
-            "scenario": scenario,
-            "summary": env.episode_summary(),
-        })
+            result_queue.put({
+                "worker_id": worker_id,
+                "states": np.asarray(states, dtype=np.float32),
+                "actions": actions, "rewards": rewards, "dones": dones, "legals": legals,
+                "log_probs": log_probs if agent.needs_log_probs else None,
+                "values": values if agent.needs_log_probs else None,
+                "final_state": np.asarray(state, dtype=np.float32),
+                "final_legal": env.legal_actions() if not env.done else [],
+                "scenario": scenario,
+                "summary": env.episode_summary(),
+            })
+        except Exception:
+            # A dead worker used to leave collect() blocked forever on the
+            # result queue; report the failure instead and stay alive for the
+            # next task.  The parent decides whether to tolerate or abort.
+            import traceback
+            result_queue.put({"worker_id": worker_id, "scenario": scenario,
+                              "error": traceback.format_exc()})
 
 
 # --------------------------------------------------------------------------- #
 class EpisodeCollector:
     """Persistent pool of episode workers for one algorithm."""
 
+    MAX_EPISODE_ERRORS = 50   # tolerated failed episodes before training aborts
+
     def __init__(self, cfg, algo_name: str, initial_params: Dict[str, dict],
                  n_workers: int = 0):
+        self._error_count = 0
         import torch.multiprocessing as mp
 
         self.n_workers = int(n_workers) or default_workers()
@@ -138,12 +149,27 @@ class EpisodeCollector:
                 shared[key].copy_(tensor)
 
     def collect(self, exploration: float, scenarios: Sequence[dict]) -> List[Episode]:
-        """Run one episode per scenario across the pool; blocks until all return."""
+        """Run one episode per scenario across the pool; blocks until all return.
+
+        A failed episode is dropped with a warning (the training loop simply
+        collects fewer episodes that round); repeated failures abort training
+        with the accumulated context instead of hanging or looping forever.
+        """
         for scenario in scenarios:
             self._task_queue.put((exploration, scenario))
         episodes: List[Episode] = []
         for _ in scenarios:
             record = self._result_queue.get()
+            if "error" in record:
+                self._error_count += 1
+                print(f"[collector] episode failed on worker {record['worker_id']} "
+                      f"({self._error_count}/{self.MAX_EPISODE_ERRORS} tolerated), "
+                      f"scenario={record['scenario']}\n{record['error']}")
+                if self._error_count > self.MAX_EPISODE_ERRORS:
+                    raise RuntimeError(
+                        f"{self._error_count} episodes failed -- training aborted; "
+                        "see the worker tracebacks above")
+                continue
             episodes.append(Episode(
                 states=record["states"], actions=record["actions"],
                 rewards=record["rewards"], dones=record["dones"],

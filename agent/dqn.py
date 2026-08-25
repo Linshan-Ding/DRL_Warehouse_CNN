@@ -69,8 +69,9 @@ class DQNAgent(LearningAgent):
         legal = env.legal_actions()
         if random.random() < exploration:
             return random.choice(legal), None, None
-        q = self._masked(self.q_net(self._tensor(state, self.device)), legal)
-        return int(torch.argmax(q, dim=1).item()), None, None
+        q = self._legal_subvector(self.q_net(self._tensor(state, self.device)),
+                                  legal, f"{self.name}.act_collect")
+        return int(legal[int(torch.argmax(q).item())]), None, None
 
     # -- learner side ------------------------------------------------------ #
     def learn(self, episodes: List[Episode]) -> Dict[str, float]:
@@ -121,16 +122,19 @@ class DQNAgent(LearningAgent):
     # -- evaluation -------------------------------------------------------- #
     @torch.no_grad()
     def act_greedy(self, env, state: np.ndarray) -> int:
-        q = self._masked(self.q_net(self._tensor(state, self.device)), env.legal_actions())
-        return int(torch.argmax(q, dim=1).item())
+        legal = env.legal_actions()
+        q = self._legal_subvector(self.q_net(self._tensor(state, self.device)),
+                                  legal, f"{self.name}.act_greedy")
+        return int(legal[int(torch.argmax(q).item())])
 
     @torch.no_grad()
     def act_stochastic(self, env, state: np.ndarray) -> int:
         legal = env.legal_actions()
         if random.random() < self.cfg.eval_epsilon:
             return random.choice(legal)
-        q = self._masked(self.q_net(self._tensor(state, self.device)), legal)
-        return int(torch.argmax(q, dim=1).item())
+        q = self._legal_subvector(self.q_net(self._tensor(state, self.device)),
+                                  legal, f"{self.name}.act_stochastic")
+        return int(legal[int(torch.argmax(q).item())])
 
     # -- persistence ------------------------------------------------------- #
     def save(self, path: str) -> None:

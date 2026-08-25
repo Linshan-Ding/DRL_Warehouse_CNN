@@ -53,7 +53,7 @@ tools/         正确性闸门与产生初稿结果的原实现（参考副本�
 
 | 列名 | 实现 | 关键设置（Table 6 对齐） |
 |---|---|---|
-| SAPPO | PPO（本文方法） | Table 4 全套，γ=0.99 |
+| SAPPO | PPO（本文方法） | 修订稿 Table 4 全套，γ=0.99 |
 | AG-DQN | DQN | replay 100k、target 2000、ε 1→0.05 |
 | HSDDQN | Double DQN | 同上 + double-Q |
 | SOA+A2C | A2C | rollout 200 |
@@ -61,6 +61,14 @@ tools/         正确性闸门与产生初稿结果的原实现（参考副本�
 
 **评测协议：** 每个 RL 算法在每个算例上**随机策略采样评估 3 次**（策略梯度类按分布
 采样；值函数类 ε=0.05 贪婪）→ F̄ 均值±标准差；调度规则确定性单次。
+
+**SAPPO 全局策略稳定化（R2 修订，随修订稿 Table 4 更新）：** 混采场景的回报量级差
+一个数量级，为此 (a) critic 在**归一化回报空间**训练（运行统计随参数广播给 worker）；
+(b) 优势**按回合内标准化**（`algo.advantage_norm`，让轻载/重载场景在梯度中等权发声）；
+(c) PPO epoch 上限 4，**KL 超过 `kl_target=0.02` 提前停止**；(d) 学习率与熵系数按训练
+进度**线性衰减**（→10% / →0.002）；(e) minibatch 256；(f) 策略/价值网络正交初始化
+（策略头 gain 0.01，初始近均匀策略）。checkpoint 按 **3 条 λ 验证流 × 3 档车队
+(1,2)/(2,4)/(3,6) 共 9 个贪婪回合的均值**选取，覆盖各负载档而非只看中档。
 
 ---
 
@@ -79,12 +87,15 @@ tools/         正确性闸门与产生初稿结果的原实现（参考副本�
    - **Representative cases**：四条固定代表算例 **C06/C13/C15/C24** 的贪婪 F̄ 曲线
      合并在一个多线窗口——这就是"训练效果"的直接监控，也是论文 Fig. 8 的数据来源
      （同步落盘在 `log.csv` 的 `curve_C*` 列）；
-   - `eval_flow_mean`：验证流上的贪婪 F̄（checkpoint 按它选，独立于上面四个算例）；
+   - `eval_flow_mean`：验证小网格（3 条 λ 流 × 3 档车队 = 9 个贪婪回合）的 F̄ 均值
+     （checkpoint 按它选，独立于上面四个算例）；
    - `mean_flow_time`：训练 episode（采样策略、随机场景）的 F̄，噪声大属正常；
+   - SAPPO 另有 `ret_mean/ret_std`（critic 归一化统计）、`ppo_epochs_used`（KL 早停
+     实际用的 epoch 数）、`actor_lr`/`entropy_coef`（衰减进度）；
    - loss/熵/KL/sps/显存等诊断曲线各自成窗。
    评估频率由 `configs/train.yaml` 的 `eval_interval` 控制（默认 10 轮 ≈ 8 worker 下
-   每 80 episodes 一个点；每次评估约 30–60 s、期间 worker 空闲，调大省时间调小更密）。
-   不起 visdom 服务训练照常，曲线数据始终写入 `log.csv`。
+   每 80 episodes 一个点；每次评估 13 个贪婪回合约 1–2 分钟、期间 worker 空闲，
+   调大省时间调小更密）。不起 visdom 服务训练照常，曲线数据始终写入 `log.csv`。
 
 **内存**：DQN 系 replay 默认 10 万条 float16 转移 ≈ 1.3 GB；不足时在
 `configs/train.yaml` 调小 `replay_size`。

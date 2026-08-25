@@ -14,28 +14,39 @@ train:
   perturb_pick_times: [15.0, 20.0]
   perturb_layout_prob: 0.34   # probability that a perturbed episode uses the middle cross-aisle
 
-  # Rounds between the periodic evaluations (validation streams for checkpoint
-  # selection + the representative-case curves).  Each evaluation runs 7 greedy
-  # episodes in the main process (~30-60 s) while the workers idle, so smaller
-  # values buy curve density at a small throughput cost.  10 rounds with
-  # 8 workers = one curve point every ~80 episodes.
+  # Rounds between the periodic evaluations (validation mini-grid for
+  # checkpoint selection + the representative-case curves).  Validation covers
+  # 3 lambda streams x 3 fleets (val_fleets) = 9 greedy episodes, plus 4 curve
+  # cases: 13 greedy episodes in the main process (~1-2 min) while the workers
+  # idle, so smaller values buy curve density at a throughput cost.  10 rounds
+  # with 8 workers = one curve point every ~80 episodes.
   eval_interval: 10
+  val_fleets: [[1, 2], [2, 4], [3, 6]]   # (K, R) grid for checkpoint selection
   curve_cases: [C06, C13, C15, C24]   # logged for the Fig. 8 style training curves
 
-# SAPPO (PPO) hyperparameters -- manuscript Table 4, verbatim.
+# SAPPO (PPO) hyperparameters -- revised-manuscript Table 4.
+# R2 changes vs the R1 table: minibatch 64 -> 256, ppo_epochs 2 -> 4 with a
+# KL-based early stop (kl_target), learning rates and entropy coefficient
+# decay linearly over the episode budget.  On top of these Table-4 entries the
+# implementation normalises critic targets and standardises advantages per
+# episode (advantage_norm) -- both required by mixed-scenario global training.
 algo:
-  actor_lr: 1.0e-4
-  critic_lr: 3.0e-5
+  actor_lr: 1.0e-4            # decays linearly to actor_lr * lr_end_factor
+  critic_lr: 3.0e-5           # same schedule as the actor
   gamma: 0.99
   gae_lambda: 0.95
   clip_eps: 0.2
   value_coef: 0.2
-  entropy_coef: 0.01
+  entropy_coef: 0.01          # decays linearly to entropy_coef_end
   max_grad_norm: 0.5
-  ppo_epochs: 2
-  minibatch_size: 64
+  ppo_epochs: 4               # upper bound; kl_target stops epochs early
+  minibatch_size: 256
   ratio_cap: 5.0
   advantage_clip: 5.0
+  advantage_norm: per_episode # per_episode (equal voice per scenario) | batch
+  kl_target: 0.02
+  lr_end_factor: 0.1
+  entropy_coef_end: 0.002
   cnn_output_dim: 256
   policy_hidden: 2048
   value_hidden: 1024

@@ -10,10 +10,11 @@ saved parameter file serves every evaluation scenario.  Collection runs on
 parallel worker processes; the update runs batched on the GPU strictly between
 collection rounds (on-policy safe).
 
-The single deliverable is ``models/<algo>.pt`` -- the parameters that achieved
-the best greedy mean flow time on the fixed validation streams.  Training
-curves on the representative cases (C06/C13/C15/C24, for the Fig. 8 style
-figure) are logged but never used for selection.
+The single deliverable is ``models/<algo>.pt`` -- the parameters with the best
+mean greedy flow time on the validation mini-grid (three fixed lambda streams,
+each evaluated on the fleets in ``train.val_fleets``).  Training curves on the
+representative cases (C06/C13/C15/C24, for the Fig. 8 style figure) are logged
+but never used for selection.
 """
 from __future__ import annotations
 
@@ -44,13 +45,19 @@ def sample_scenario(cfg: Config, rng: random.Random) -> dict:
     lam = rng.choice(cfg.instance.case_interarrivals)
     env_overrides: Dict[str, object] = {}
 
-    if roll < tc.w_main:
-        env_overrides["n_pickers"] = rng.choice(cfg.instance.case_pickers)
-        env_overrides["n_robots"] = rng.choice(cfg.instance.case_robots)
-    elif roll < tc.w_main + tc.w_scale:
-        k, r = rng.choice(tc.scale_configs)
+    # Scale configs beyond the action-head envelope (shrunk by the grid
+    # overlays) cannot be represented -- filter them out; a scale roll with no
+    # representable config falls back to the main-grid branch.
+    scale_configs = [(k, r) for k, r in tc.scale_configs
+                     if k <= cfg.env.k_max and r <= cfg.env.r_max]
+
+    if tc.w_main <= roll < tc.w_main + tc.w_scale and scale_configs:
+        k, r = rng.choice(scale_configs)
         env_overrides["n_pickers"] = int(k)
         env_overrides["n_robots"] = int(r)
+    elif roll < tc.w_main + tc.w_scale:
+        env_overrides["n_pickers"] = rng.choice(cfg.instance.case_pickers)
+        env_overrides["n_robots"] = rng.choice(cfg.instance.case_robots)
     else:
         env_overrides["n_pickers"] = rng.choice(cfg.instance.case_pickers)
         env_overrides["n_robots"] = rng.choice(cfg.instance.case_robots)
@@ -77,9 +84,17 @@ def _greedy_flow(cfg: Config, agent, stream_path: str, env_overrides: dict) -> f
 
 
 def validate(cfg: Config, agent) -> float:
-    """Greedy mean flow time over the fixed validation streams (default scenario)."""
-    flows = [_greedy_flow(cfg, agent, row["path"], {})
-             for row in read_index(cfg, tier="val")]
+    """Greedy mean flow time over the validation mini-grid.
+
+    Each fixed lambda stream is evaluated on every fleet in
+    ``cfg.train.val_fleets``, so the saved checkpoint is the best across load
+    regimes -- a single-scenario validation would bias selection toward the
+    centre of the case grid.
+    """
+    flows = [_greedy_flow(cfg, agent, row["path"],
+                          {"n_pickers": int(k), "n_robots": int(r)})
+             for row in read_index(cfg, tier="val")
+             for k, r in cfg.train.val_fleets]
     return float(np.mean(flows)) if flows else float("nan")
 
 

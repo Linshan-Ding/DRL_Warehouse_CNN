@@ -11,7 +11,8 @@ instance:
   case_pickers: [1, 2, 3]                  # K, middle loop
   case_robots: [2, 4, 6]                   # R, inner loop
 
-  n_val: 3                                 # validation streams (checkpoint selection)
-  val_interarrival: 40.0
+  # Validation streams (checkpoint selection): one per arrival rate, each
+  # evaluated on the fleet mini-grid train.val_fleets during training.
+  val_streams_per_lambda: 1
 
   instances_dir: data/instances

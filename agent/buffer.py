@@ -44,8 +44,15 @@ class RolloutBuffer:
 
     # ------------------------------------------------------------------ #
     def compute_gae(self, gamma: float, gae_lambda: float, advantage_clip: float,
-                    last_value: float = 0.0):
-        """Backward GAE-lambda recursion; advantages are standardised and clipped."""
+                    last_value: float = 0.0, advantage_norm: str = "batch"):
+        """Backward GAE-lambda recursion; advantages are standardised and clipped.
+
+        ``advantage_norm="per_episode"`` standardises within each episode
+        segment instead of across the whole buffer: a collection round mixes
+        scenarios whose raw advantage magnitudes differ by an order of
+        magnitude, and batch-level standardisation lets the heavy-load
+        episodes drown out the light-load ones.
+        """
         n = len(self.rewards)
         advantages = np.zeros(n, dtype=np.float32)
         returns = np.zeros(n, dtype=np.float32)
@@ -60,15 +67,24 @@ class RolloutBuffer:
             returns[t] = gae + self.values[t]
             next_value = self.values[t]
 
-        if advantages.std() > 0:
+        if advantage_norm == "per_episode":
+            starts = [0] + [t + 1 for t in range(n - 1) if self.dones[t]]
+            for start, end in zip(starts, starts[1:] + [n]):
+                segment = advantages[start:end]
+                if segment.std() > 0:
+                    advantages[start:end] = \
+                        (segment - segment.mean()) / (segment.std() + 1e-8)
+        elif advantages.std() > 0:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-            advantages = np.clip(advantages, -advantage_clip, advantage_clip)
+        advantages = np.clip(advantages, -advantage_clip, advantage_clip)
         return returns, advantages
 
     # ------------------------------------------------------------------ #
     def tensors(self, device: str, gamma: float, gae_lambda: float,
-                advantage_clip: float) -> Dict[str, torch.Tensor]:
-        returns, advantages = self.compute_gae(gamma, gae_lambda, advantage_clip)
+                advantage_clip: float,
+                advantage_norm: str = "batch") -> Dict[str, torch.Tensor]:
+        returns, advantages = self.compute_gae(gamma, gae_lambda, advantage_clip,
+                                               advantage_norm=advantage_norm)
         return {
             "states": torch.as_tensor(np.asarray(self.states, dtype=np.float32), device=device),
             "actions": torch.as_tensor(self.actions, dtype=torch.long, device=device),

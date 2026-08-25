@@ -6,7 +6,7 @@ not appear in the paper.
 
 | | |
 |---|---|
-| Version | 2.0 |
+| Version | 2.1 |
 | Status | active (full rebuild — replaces every result of the submitted rounds) |
 | Paper | *Spatially-Aware DRL for Human-Robot Collaborative Order Picking* (CAIE, R2) |
 | How to run | right-click the scripts under `experiments/`; see `README.md` / `README_EN.md` |
@@ -15,6 +15,7 @@ not appear in the paper.
 
 | Version | Change | Reason |
 |---|---|---|
+| 2.1 | SAPPO global-policy stabilisers: normalised-return critic (running stats as network buffers), per-episode advantage standardisation, orthogonal init (policy head gain 0.01), KL early stop (target 0.02) with ppo_epochs 2→4, minibatch 64→256, linear decay of learning rates (→10 %) and entropy coefficient (→0.002); checkpoint validation widened to a λ×fleet mini-grid (3 λ streams × fleets (1,2)/(2,4)/(3,6)); scenario sampler filters scale fleets to the action-head envelope. Revised-manuscript Table 4 must reflect the hyperparameter rows. Baselines untouched. | Mixed-scenario returns differ by an order of magnitude: the raw-scale critic saturated the gradient clip and batch-level advantage normalisation let heavy-load scenarios drown out light-load ones — exactly the cases where the rules are hardest to beat. Single-scenario validation biased checkpoint selection toward the grid centre. |
 | 2.0 | Full rebuild: single global policy per algorithm (envelope head K≤10/R≤20 + configuration planes), per-episode scenario randomisation, four RL baselines implemented as the cited methods' base algorithms, D̄ redefined as true wall-clock decision time, 27 independent case streams, 3-stochastic-sample evaluation, multi-process collection. All previous results are superseded. | The submitted D̄ column mixed simulated-time quantities; baselines were absent from the repository; per-configuration retraining was the reviewers' central objection (R2.1). |
 | 1.x | (history) per-configuration training, E0–E9 supplementary experiments. | superseded |
 
@@ -36,14 +37,16 @@ capacity C generalises assumption (A1); C = 1 degenerates exactly (gate 3).
 
 | Column | Base algorithm | Notes |
 |---|---|---|
-| SAPPO | PPO | Table 4 hyperparameters |
+| SAPPO | PPO | revised Table 4; normalised-return critic, per-episode advantage standardisation, KL early stop (0.02, ≤4 epochs), minibatch 256, linear lr/entropy decay, orthogonal init |
 | AG-DQN / HSDDQN | DQN / Double DQN | replay 100k (float16), target 2000, ε 1→0.05 |
 | SOA+A2C / DRLG | A2C (n=200) / short-rollout AC (n=20) | Table 6 common settings |
 | MQ-ND, MQ-MinRQ, MQ-MI, MI-MinRQ, MI-MI | deterministic dispatching rules | Section 5.3 |
 
-One parameter file per RL algorithm (`models/<algo>.pt`), selected by greedy
-validation on the fixed val streams; representative-case curves (C06/C13/C15/
-C24) are logged for Fig. 8 only.
+One parameter file per RL algorithm (`models/<algo>.pt`), selected by mean
+greedy F̄ over the validation mini-grid — 3 fixed λ streams
+(`val/val_l{20,40,60}.csv`) × fleets (1,2)/(2,4)/(3,6) = 9 episodes — so the
+saved checkpoint is the best across load regimes. Representative-case curves
+(C06/C13/C15/C24) are logged for Fig. 8 only.
 
 ## 3. Training and evaluation protocol
 
